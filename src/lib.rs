@@ -25,6 +25,7 @@ pub mod logging;
 pub mod mcp;
 pub mod scout;
 pub mod server;
+pub mod ssh;
 pub mod synapse;
 pub mod synapse2;
 pub mod token_limit;

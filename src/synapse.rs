@@ -28,6 +28,10 @@ pub struct HostConfig {
     pub ssh_user: Option<String>,
     #[serde(rename = "sshKeyPath", default)]
     pub ssh_key_path: Option<String>,
+    #[serde(rename = "sshPort", default)]
+    pub ssh_port: Option<u16>,
+    #[serde(rename = "sshConfigPath", default)]
+    pub ssh_config_path: Option<String>,
     #[serde(rename = "dockerSocketPath", default)]
     pub docker_socket_path: Option<String>,
     #[serde(default)]
@@ -47,6 +51,8 @@ impl HostConfig {
             protocol: HostProtocol::Local,
             ssh_user: None,
             ssh_key_path: None,
+            ssh_port: None,
+            ssh_config_path: None,
             docker_socket_path: Some("/var/run/docker.sock".into()),
             tags: vec!["local".into()],
             compose_search_paths: Vec::new(),

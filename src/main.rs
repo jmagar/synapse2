@@ -64,6 +64,19 @@ async fn main() -> Result<()> {
         .with_target(true)
         .init();
 
+    if serve_mode || stdio_mode {
+        // Startup sweep: remove stale forwarded sockets from prior runs whose
+        // owning pid is dead (sockets persist on SIGKILL/panic). Must run before
+        // any SSH pool / port-forward initialisation so a leftover
+        // `/tmp/synapse2-*-*.sock` cannot shadow a fresh forward. Server modes
+        // only — a one-shot CLI invocation should not sweep shared `/tmp`.
+        synapse2::ssh::sweep_stale_sockets();
+        // Warn if known_hosts has wildcard patterns that defeat strict host-key
+        // checking (suppressed in stdio mode since logs are warn-level only and
+        // must not pollute the JSON-RPC stream — tracing writes to stderr, OK).
+        synapse2::ssh::warn_on_known_hosts_wildcards();
+    }
+
     if serve_mode {
         serve_mcp().await
     } else if stdio_mode {
