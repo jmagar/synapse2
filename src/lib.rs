@@ -21,6 +21,7 @@ pub mod cache;
 pub mod cli;
 pub mod config;
 pub mod docker;
+pub mod elicitation_gate;
 pub mod formatters;
 pub mod host_config;
 pub mod logging;

@@ -53,16 +53,19 @@ pub struct McpConfig {
     /// that enforces its own auth (SYNAPSE_NOAUTH). Loaded here so it participates in
     /// typed config rather than being a raw env read at call sites.
     pub trusted_gateway: bool,
+    /// Skip destructive-operation confirmation prompts (SYNAPSE_MCP_ALLOW_DESTRUCTIVE).
+    /// Operational override only — the shims substitute a no-op `Confirmer` when set.
+    /// Loaded here (rather than a raw env read at call sites) so it is typed config.
+    /// Strict `true`/`false` parsing (see `env_bool`).
+    /// SECURITY: only safe on loopback; binding to a non-loopback address with this
+    /// set causes startup failure (enforced in `main.rs`).
+    pub allow_destructive: bool,
     /// Static bearer token for simple auth (SYNAPSE_MCP_TOKEN).
     pub api_token: Option<String>,
     /// Additional allowed Host header values (comma-separated in env).
     pub allowed_hosts: Vec<String>,
     /// Additional allowed CORS origins (comma-separated in env).
     pub allowed_origins: Vec<String>,
-    /// Allow destructive operations (rm, dd, etc.). Default: false.
-    /// SECURITY FIX: Only safe on loopback. Binding to non-loopback with this set
-    /// causes startup failure. Set via SYNAPSE_MCP_ALLOW_DESTRUCTIVE env var.
-    pub allow_destructive: bool,
     /// OAuth sub-config (nested under `[mcp.auth]` in config.toml).
     pub auth: AuthConfig,
 }
@@ -162,10 +165,10 @@ impl Default for McpConfig {
             server_name: default_server_name(),
             no_auth: false,
             trusted_gateway: false,
+            allow_destructive: false,
             api_token: None,
             allowed_hosts: Vec::new(),
             allowed_origins: Vec::new(),
-            allow_destructive: false,
             auth: AuthConfig::default(),
         }
     }
@@ -264,16 +267,16 @@ impl Config {
         env_str("SYNAPSE_MCP_SERVER_NAME", &mut config.mcp.server_name);
         env_bool("SYNAPSE_MCP_NO_AUTH", &mut config.mcp.no_auth)?;
         env_bool("SYNAPSE_NOAUTH", &mut config.mcp.trusted_gateway)?;
+        env_bool(
+            "SYNAPSE_MCP_ALLOW_DESTRUCTIVE",
+            &mut config.mcp.allow_destructive,
+        )?;
         env_opt_str("SYNAPSE_MCP_TOKEN", &mut config.mcp.api_token);
         env_list("SYNAPSE_MCP_ALLOWED_HOSTS", &mut config.mcp.allowed_hosts);
         env_list(
             "SYNAPSE_MCP_ALLOWED_ORIGINS",
             &mut config.mcp.allowed_origins,
         );
-        env_bool(
-            "SYNAPSE_MCP_ALLOW_DESTRUCTIVE",
-            &mut config.mcp.allow_destructive,
-        )?;
         env_opt_str("SYNAPSE_MCP_PUBLIC_URL", &mut config.mcp.auth.public_url);
         env_str(
             "SYNAPSE_MCP_AUTH_ADMIN_EMAIL",

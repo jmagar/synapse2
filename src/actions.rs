@@ -60,6 +60,13 @@ pub struct ActionSpec {
     pub name: &'static str,
     pub required_scope: Option<&'static str>,
     pub transport: ActionTransport,
+    /// True if this action mutates or destroys state irreversibly (container
+    /// rm/stop, docker prune, compose down, …). Destructive actions must pass
+    /// through the `elicitation_gate::Confirmer` before performing IO.
+    ///
+    /// This is the single source of truth — `read_only` is derived, not stored
+    /// (see [`is_read_only`]).
+    pub destructive: bool,
 }
 
 pub const ACTION_SPECS: &[ActionSpec] = &[
@@ -67,38 +74,56 @@ pub const ACTION_SPECS: &[ActionSpec] = &[
         name: "help",
         required_scope: None,
         transport: ActionTransport::Any,
+        destructive: false,
     },
     ActionSpec {
         name: "docker",
         required_scope: Some(READ_SCOPE),
         transport: ActionTransport::Any,
+        destructive: false,
     },
     ActionSpec {
         name: "container",
         required_scope: Some(READ_SCOPE),
         transport: ActionTransport::Any,
+        destructive: false,
     },
     ActionSpec {
         name: "host",
         required_scope: Some(READ_SCOPE),
         transport: ActionTransport::Any,
+        destructive: false,
     },
     ActionSpec {
         name: "nodes",
         required_scope: Some(READ_SCOPE),
         transport: ActionTransport::Any,
+        destructive: false,
     },
     ActionSpec {
         name: "peek",
         required_scope: Some(READ_SCOPE),
         transport: ActionTransport::Any,
+        destructive: false,
     },
     ActionSpec {
         name: "exec",
         required_scope: Some(READ_SCOPE),
         transport: ActionTransport::Any,
+        destructive: false,
     },
 ];
+
+/// Derive whether an action is read-only.
+///
+/// `read_only` is NOT stored on [`ActionSpec`]; it is derived from `destructive`
+/// plus the scope: an action is read-only when it is not destructive and does
+/// not require the write scope. This is the source for the MCP `readOnlyHint`
+/// tool annotation, while `destructiveHint` comes straight from
+/// [`ActionSpec::destructive`].
+pub fn is_read_only(spec: &ActionSpec) -> bool {
+    !spec.destructive && spec.required_scope != Some(WRITE_SCOPE)
+}
 
 pub fn action_names() -> Vec<&'static str> {
     ACTION_SPECS.iter().map(|spec| spec.name).collect()
