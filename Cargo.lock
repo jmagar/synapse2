@@ -3003,6 +3003,7 @@ dependencies = [
  "chrono",
  "dashmap",
  "dirs",
+ "futures",
  "include_dir",
  "lab-auth",
  "openssh",

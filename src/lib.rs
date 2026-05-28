@@ -6,6 +6,7 @@
 //! Public modules:
 //!   [`app`]         — `SynapseService` (business logic)
 //!   [`cache`]       — `Cache` trait and `MemoryCache` implementation (TTL, LRU eviction)
+//!   [`fanout`]      — multi-host fanout helper with `PartialSuccess` aggregation
 //!   [`formatters`]  — `ResponseFormat` enum + per-domain markdown renderers
 //!   [`config`]      — `Config`, `SynapseConfig`, `McpConfig`
 //!   [`host_config`] — `HostRepository` trait + `FileHostRepository` (precedence chain + SSH auto-discovery)
@@ -22,6 +23,7 @@ pub mod cli;
 pub mod config;
 pub mod docker;
 pub mod elicitation_gate;
+pub mod fanout;
 pub mod formatters;
 pub mod host_config;
 pub mod logging;
