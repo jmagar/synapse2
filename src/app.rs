@@ -10,7 +10,9 @@ use anyhow::Result;
 use serde_json::{json, Value};
 use std::sync::Arc;
 
+use crate::compose::{ComposeDiscovery, ComposeProject};
 use crate::host_config::{FileHostRepository, HostRepository};
+use crate::ssh::SshPool;
 use crate::synapse2::SynapseClient;
 use crate::{docker, scout};
 
@@ -29,6 +31,12 @@ pub struct SynapseService {
     /// Host configuration repository — injected for testability.
     /// Defaults to `FileHostRepository` (reads env / disk / `~/.ssh/config`).
     pub host_repo: Arc<dyn HostRepository>,
+    /// Compose project discovery engine + per-host TTL cache (B12).
+    ///
+    /// Held behind `Arc` so the shared cache survives `SynapseService::clone()`
+    /// — a fresh per-request engine would never hit the cache. Defaults to an
+    /// engine over a fresh `SshPool`. B13 (compose operations) consumes this.
+    pub compose: Arc<ComposeDiscovery>,
 }
 
 #[derive(Debug, Clone)]
@@ -89,6 +97,7 @@ impl SynapseService {
         Self {
             client,
             host_repo: Arc::new(FileHostRepository::default()),
+            compose: Arc::new(ComposeDiscovery::new(Arc::new(SshPool::new()))),
         }
     }
 
@@ -96,6 +105,26 @@ impl SynapseService {
     pub fn with_host_repo(mut self, repo: Arc<dyn HostRepository>) -> Self {
         self.host_repo = repo;
         self
+    }
+
+    /// Inject a custom compose discovery engine (for testing or future DI).
+    pub fn with_compose_discovery(mut self, compose: Arc<ComposeDiscovery>) -> Self {
+        self.compose = compose;
+        self
+    }
+
+    /// Discover compose projects on `host_name`, merging `docker compose ls`
+    /// with a filesystem scan (cache-aware). Thin delegation to the discovery
+    /// engine; resolves the host via the injected repository.
+    pub async fn compose_list(&self, host_name: &str) -> Result<Vec<ComposeProject>> {
+        let host = scout::resolve_host(self.host_repo.as_ref(), host_name)?;
+        self.compose.list(&host).await
+    }
+
+    /// Invalidate the compose discovery cache for `host_name` (or all hosts when
+    /// `None`), forcing the next `compose_list` to re-scan.
+    pub fn compose_refresh(&self, host_name: Option<&str>) {
+        self.compose.refresh(host_name);
     }
 
     /// Return a greeting for `name`, defaulting to "World".

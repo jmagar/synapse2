@@ -20,6 +20,7 @@ pub mod api;
 pub mod app;
 pub mod cache;
 pub mod cli;
+pub mod compose;
 pub mod config;
 pub mod docker;
 pub mod elicitation_gate;
