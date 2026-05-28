@@ -4,9 +4,10 @@
 //! tests can import them without duplicating state construction.
 //!
 //! Public modules:
-//!   [`app`]     — `SynapseService` (business logic)
-//!   [`cache`]   — `Cache` trait and `MemoryCache` implementation (TTL, LRU eviction)
-//!   [`config`]  — `Config`, `SynapseConfig`, `McpConfig`
+//!   [`app`]        — `SynapseService` (business logic)
+//!   [`cache`]      — `Cache` trait and `MemoryCache` implementation (TTL, LRU eviction)
+//!   [`formatters`] — `ResponseFormat` enum + per-domain markdown renderers
+//!   [`config`]     — `Config`, `SynapseConfig`, `McpConfig`
 //!   [`synapse2`] — `SynapseClient` (transport stub)
 //!   [`mcp`]     — MCP protocol layer (tools, schemas, prompts, server handler)
 //!   [`server`]  — `AppState`, `AuthPolicy`, HTTP router
@@ -19,6 +20,7 @@ pub mod cache;
 pub mod cli;
 pub mod config;
 pub mod docker;
+pub mod formatters;
 pub mod logging;
 pub mod mcp;
 pub mod scout;
