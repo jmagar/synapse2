@@ -59,6 +59,10 @@ pub struct McpConfig {
     pub allowed_hosts: Vec<String>,
     /// Additional allowed CORS origins (comma-separated in env).
     pub allowed_origins: Vec<String>,
+    /// Allow destructive operations (rm, dd, etc.). Default: false.
+    /// SECURITY FIX: Only safe on loopback. Binding to non-loopback with this set
+    /// causes startup failure. Set via SYNAPSE_MCP_ALLOW_DESTRUCTIVE env var.
+    pub allow_destructive: bool,
     /// OAuth sub-config (nested under `[mcp.auth]` in config.toml).
     pub auth: AuthConfig,
 }
@@ -161,6 +165,7 @@ impl Default for McpConfig {
             api_token: None,
             allowed_hosts: Vec::new(),
             allowed_origins: Vec::new(),
+            allow_destructive: false,
             auth: AuthConfig::default(),
         }
     }
@@ -265,6 +270,10 @@ impl Config {
             "SYNAPSE_MCP_ALLOWED_ORIGINS",
             &mut config.mcp.allowed_origins,
         );
+        env_bool(
+            "SYNAPSE_MCP_ALLOW_DESTRUCTIVE",
+            &mut config.mcp.allow_destructive,
+        )?;
         env_opt_str("SYNAPSE_MCP_PUBLIC_URL", &mut config.mcp.auth.public_url);
         env_str(
             "SYNAPSE_MCP_AUTH_ADMIN_EMAIL",

@@ -104,6 +104,21 @@ pub fn router(state: AppState) -> Router {
 }
 
 fn cors_layer(config: &crate::config::McpConfig) -> CorsLayer {
+    // SECURITY FIX: Document the CORS allowlist policy.
+    //
+    // By default, the following origins are always allowed (permissive-by-design for API use):
+    //   - http://localhost:{port}
+    //   - http://127.0.0.1:{port}
+    //
+    // Additionally, CORS origins can be expanded via:
+    //   - SYNAPSE_MCP_ALLOWED_ORIGINS env var (comma-separated)
+    //   - [mcp] allowed_origins in config.toml
+    //   - SYNAPSE_MCP_PUBLIC_URL (for OAuth deployments)
+    //
+    // This default policy is intentionally broad for local development and API gatewaying.
+    // In production, restrict CORS to specific client origins (e.g., https://claude.ai)
+    // to prevent browser-based CSRF attacks. Auth middleware (bearer token or OAuth)
+    // is the primary security control; CORS is defense-in-depth for browser clients.
     let origins: Vec<HeaderValue> = allowed_origins(config)
         .into_iter()
         .filter_map(|o| match o.parse::<HeaderValue>() {

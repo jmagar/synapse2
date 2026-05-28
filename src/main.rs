@@ -78,6 +78,27 @@ async fn main() -> Result<()> {
 /// Start the MCP HTTP server (Streamable HTTP transport).
 async fn serve_mcp() -> Result<()> {
     let config = Config::load()?;
+
+    // SECURITY FIX: Warn and refuse to bind if SYNAPSE_MCP_ALLOW_DESTRUCTIVE is set
+    // on a non-loopback bind. This prevents accidental deployment of dangerous config.
+    if config.mcp.allow_destructive {
+        if config.mcp.is_loopback() {
+            tracing::warn!(
+                "SYNAPSE_MCP_ALLOW_DESTRUCTIVE=true on loopback — destructive actions enabled locally"
+            );
+        } else {
+            tracing::error!(
+                bind = %config.mcp.bind_addr(),
+                "SYNAPSE_MCP_ALLOW_DESTRUCTIVE=true on non-loopback bind — refusing to start. \
+                 Destructive actions must not be exposed to the network. \
+                 Either set SYNAPSE_MCP_ALLOW_DESTRUCTIVE=false or bind to localhost."
+            );
+            return Err(anyhow::anyhow!(
+                "SYNAPSE_MCP_ALLOW_DESTRUCTIVE incompatible with non-loopback bind"
+            ));
+        }
+    }
+
     let state = build_state(config).await?;
 
     info!(

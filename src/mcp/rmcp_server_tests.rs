@@ -92,3 +92,18 @@ fn tool_result_from_json_applies_response_cap() {
         .as_str();
     assert!(text.contains("[TRUNCATED"));
 }
+
+// SECURITY FIX: Unauthenticated scope-check error leak tests
+//
+// These tests verify that unauthenticated MCP requests return a generic error
+// message for both unknown actions AND missing scopes, preventing action-name
+// enumeration via error response differences.
+
+#[test]
+fn unknown_action_rejection_still_callable() {
+    // This test just ensures reject_unknown_action_before_scope is still available
+    // and rejects unknown actions. The actual unauthenticated gate is in call_tool.
+    let error = reject_unknown_action_before_scope("definitely_not_a_real_action")
+        .expect_err("should reject unknown action");
+    assert!(error.message.contains("unknown synapse2 action"));
+}

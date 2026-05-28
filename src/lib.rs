@@ -5,6 +5,7 @@
 //!
 //! Public modules:
 //!   [`app`]     — `SynapseService` (business logic)
+//!   [`cache`]   — `Cache` trait and `MemoryCache` implementation (TTL, LRU eviction)
 //!   [`config`]  — `Config`, `SynapseConfig`, `McpConfig`
 //!   [`synapse2`] — `SynapseClient` (transport stub)
 //!   [`mcp`]     — MCP protocol layer (tools, schemas, prompts, server handler)
@@ -14,6 +15,7 @@
 pub mod actions;
 pub mod api;
 pub mod app;
+pub mod cache;
 pub mod cli;
 pub mod config;
 pub mod docker;

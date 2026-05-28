@@ -2,7 +2,7 @@
   "openapi": "3.1.0",
   "info": {
     "title": "Example MCP REST API",
-    "version": "0.4.0",
+    "version": "0.5.0",
     "description": "Generated OpenAPI schema for rmcp-template's REST surface. TEMPLATE: rename Example identifiers and action schemas when adapting. Auth modes: loopback/trusted-gateway deployments may have no local auth; mounted bearer mode uses EXAMPLE_MCP_TOKEN; OAuth mode uses bearer JWTs. REST actions require their action-specific scopes when auth is mounted."
   },
   "servers": [
@@ -105,7 +105,7 @@
           "actions"
         ],
         "summary": "Dispatch a REST action",
-        "description": "Thin REST shim over the shared service layer. MCP-only actions are not exposed here. Current REST actions: greet, echo, status, help. When auth is mounted, each action requires its declared scope; example:write satisfies example:read.",
+        "description": "Thin REST shim over the shared service layer. MCP-only actions are not exposed here. Current REST actions: help, docker, container, host, nodes, peek, exec. When auth is mounted, each action requires its declared scope; example:write satisfies example:read.",
         "operationId": "dispatchExampleAction",
         "security": [
           {
@@ -121,31 +121,45 @@
                 "$ref": "#/components/schemas/ActionRequest"
               },
               "examples": {
-                "greet": {
-                  "value": {
-                    "action": "greet",
-                    "params": {
-                      "name": "Alice"
-                    }
-                  }
-                },
-                "echo": {
-                  "value": {
-                    "action": "echo",
-                    "params": {
-                      "message": "Hello!"
-                    }
-                  }
-                },
-                "status": {
-                  "value": {
-                    "action": "status",
-                    "params": {}
-                  }
-                },
                 "help": {
                   "value": {
                     "action": "help",
+                    "params": {}
+                  }
+                },
+                "docker": {
+                  "value": {
+                    "action": "docker",
+                    "params": {}
+                  }
+                },
+                "container": {
+                  "value": {
+                    "action": "container",
+                    "params": {}
+                  }
+                },
+                "host": {
+                  "value": {
+                    "action": "host",
+                    "params": {}
+                  }
+                },
+                "nodes": {
+                  "value": {
+                    "action": "nodes",
+                    "params": {}
+                  }
+                },
+                "peek": {
+                  "value": {
+                    "action": "peek",
+                    "params": {}
+                  }
+                },
+                "exec": {
+                  "value": {
+                    "action": "exec",
                     "params": {}
                   }
                 }
@@ -193,10 +207,13 @@
       "ActionName": {
         "type": "string",
         "enum": [
-          "greet",
-          "echo",
-          "status",
-          "help"
+          "help",
+          "docker",
+          "container",
+          "host",
+          "nodes",
+          "peek",
+          "exec"
         ],
         "description": "REST-capable action names from src/actions.rs."
       },
@@ -423,14 +440,14 @@
     "source": "scripts/check-openapi.py",
     "action_metadata": "src/actions.rs",
     "rest_actions": [
-      "greet",
-      "echo",
-      "status",
-      "help"
+      "help",
+      "docker",
+      "container",
+      "host",
+      "nodes",
+      "peek",
+      "exec"
     ],
-    "mcp_only_actions": [
-      "elicit_name",
-      "scaffold_intent"
-    ]
+    "mcp_only_actions": []
   }
 }

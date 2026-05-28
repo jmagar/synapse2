@@ -67,7 +67,7 @@ pub struct HostsFile {
 
 pub const ALLOWED_READ_COMMANDS: &[&str] = &[
     "cat", "head", "tail", "grep", "rg", "ls", "tree", "wc", "uniq", "diff", "stat", "file", "du",
-    "df", "pwd", "hostname", "uptime", "whoami", "git",
+    "df", "pwd", "hostname", "uptime", "whoami",
 ];
 
 pub const EXEC_DENYLIST: &[&str] = &[
@@ -81,6 +81,12 @@ pub fn validate_safe_path(path: &str) -> Result<()> {
     if path.is_empty() {
         bail!("path must not be empty");
     }
+
+    // SECURITY FIX: Require absolute path (starts with /)
+    if !path.starts_with('/') {
+        bail!("absolute path required");
+    }
+
     if path.split('/').any(|part| part == "..") {
         bail!("path traversal is not allowed");
     }
@@ -90,6 +96,23 @@ pub fn validate_safe_path(path: &str) -> Result<()> {
     {
         bail!("path contains unsafe characters");
     }
+
+    // SECURITY FIX: Reject symlinks via symlink_metadata before any read.
+    // std::fs::read_to_string follows symlinks — this protects against
+    // symlink-based arbitrary file reads in world-writable directories.
+    match std::fs::symlink_metadata(path) {
+        Ok(metadata) => {
+            if metadata.file_type().is_symlink() {
+                bail!("symlinks not permitted");
+            }
+        }
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+            // Path doesn't exist yet — this is OK (e.g., during file creation).
+            // The actual operation (read/write) will check existence.
+        }
+        Err(e) => bail!("cannot validate path: {e}"),
+    }
+
     Ok(())
 }
 

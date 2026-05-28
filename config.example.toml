@@ -89,7 +89,18 @@ server_name = "synapse2"
 # Extra CORS origins for browser-based MCP clients.
 # SYNAPSE_MCP_ALLOWED_ORIGINS env var (comma-separated) overrides this.
 # TEMPLATE: Add your frontend origin if building a browser-based client.
+# SECURITY NOTE: By default, localhost and 127.0.0.1 are always allowed.
+#                Add specific client origins (e.g., https://claude.ai) in production.
+#                CORS is defense-in-depth; auth (bearer token or OAuth) is the
+#                primary security control. An authenticated attacker can bypass CORS.
 # allowed_origins = ["https://claude.ai", "http://localhost:5173"]
+
+# Allow destructive operations (rm, dd, mkfs, etc.).
+# SYNAPSE_MCP_ALLOW_DESTRUCTIVE env var (true/false) overrides this.
+# SECURITY: Only safe on loopback (localhost). If set to true with a non-loopback
+#           bind address, the server will refuse to start with a clear error message.
+#           Do NOT enable this in production unless absolutely necessary.
+# allow_destructive = false
 
 # ── OAuth / JWT authentication ────────────────────────────────────────────────
 # TEMPLATE: This sub-section configures the optional OAuth + JWT auth layer.

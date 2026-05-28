@@ -83,14 +83,32 @@ impl ServerHandler for SynapseRmcpServer {
                 None,
             ));
         }
-        if let Some(action_str) = action_opt.as_deref() {
-            reject_unknown_action_before_scope(action_str)?;
-        }
-        // Only scope-check when a known action is present; dispatch_example will
-        // return the validation error for a missing action below.
-        if let (Some(auth), Some(action_str)) = (auth, action_opt.as_deref()) {
-            if let Some(required_scope) = required_scope_for_action(action_str) {
-                check_scope(auth, required_scope, action_str)?;
+
+        // SECURITY FIX: Before auth succeeds, return generic error for both unknown
+        // actions and missing scopes. This prevents unauthenticated probes from
+        // enumerating valid action names.
+        if let Some(auth_ctx) = auth {
+            // Authenticated: safe to return specific errors
+            if let Some(action_str) = action_opt.as_deref() {
+                reject_unknown_action_before_scope(action_str)?;
+                if let Some(required_scope) = required_scope_for_action(action_str) {
+                    check_scope(auth_ctx, required_scope, action_str)?;
+                }
+            }
+        } else {
+            // Unauthenticated (loopback or trusted gateway): still validate action
+            // but don't leak information before scope check
+            if let Some(action_str) = action_opt.as_deref() {
+                if !is_known_action(action_str) {
+                    return Err(ErrorData::invalid_request("invalid request", None));
+                }
+                if let Some(required_scope) = required_scope_for_action(action_str) {
+                    if required_scope != crate::actions::READ_SCOPE
+                        && required_scope != crate::actions::WRITE_SCOPE
+                    {
+                        return Err(ErrorData::invalid_request("invalid request", None));
+                    }
+                }
             }
         }
 

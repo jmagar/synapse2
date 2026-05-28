@@ -13,6 +13,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 <!-- TEMPLATE: Add changes here as you work. They move to a version section on release. -->
 
+## [0.5.0] — 2026-05-28
+
+### Added
+
+- `src/cache.rs` / `src/cache_tests.rs` — generic synchronous `Cache<K, V>` trait and `MemoryCache` implementation: per-entry TTL (default 60s), bounded capacity with LRU eviction (default 10k entries), lazy expiration, and `DashMap`-backed thread safety. Adds the `dashmap` dependency.
+- `allow_destructive` config option (`SYNAPSE_MCP_ALLOW_DESTRUCTIVE` env var, default `false`) gating destructive shell operations. Documented in `config.example.toml`.
+
+### Security
+
+- `validate_safe_path` now requires absolute paths and rejects symlinks via `symlink_metadata` before any read — prevents symlink-based arbitrary file reads in world-writable directories.
+- Removed `git` from the exec allowlist (`EXEC_ALLOWLIST`).
+- The MCP server returns a generic `invalid request` error to unauthenticated callers for unknown actions and scope mismatches, preventing unauthenticated probes from enumerating valid action names.
+- The server refuses to start when `SYNAPSE_MCP_ALLOW_DESTRUCTIVE=true` is set on a non-loopback bind address, and warns when enabled on loopback.
+- Documented the CORS allowlist policy in `src/server/routes.rs` and `config.example.toml`: auth (bearer/OAuth) is the primary control; CORS is defense-in-depth for browser clients.
+
+### Changed
+
+- Dependency bumps via Dependabot: `serde_json` 1.0.149 → 1.0.150, `EmbarkStudios/cargo-deny-action`, and (web app) `postcss` 8.5.14 → 8.5.15, `@types/react`.
+
 ## [0.4.0] — 2026-05-14
 
 ### Added
