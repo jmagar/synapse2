@@ -6,6 +6,8 @@
 //! - `emit` fanout returns partial success on mixed outcomes
 //! - path validation: relative path + `..` rejected
 
+use std::sync::Arc;
+
 use crate::elicitation_gate::{ConfirmationDenied, Confirmer};
 use crate::ssh::{CommandOutput, SshExecutor};
 use crate::synapse::HostConfig;
@@ -161,8 +163,15 @@ async fn exec_rejects_non_allowlisted_command() {
 
 #[tokio::test]
 async fn emit_empty_targets_is_error() {
-    let result: anyhow::Result<serde_json::Value> =
-        super::emit(&[], &AlwaysOkExec, &ApproveConfirmer, "cat", &[], None).await;
+    let result: anyhow::Result<serde_json::Value> = super::emit(
+        &[],
+        Arc::new(AlwaysOkExec),
+        &ApproveConfirmer,
+        "cat",
+        &[],
+        None,
+    )
+    .await;
     assert!(result.is_err(), "empty targets must be rejected");
 }
 
@@ -173,8 +182,15 @@ async fn emit_rejects_when_confirmer_declines() {
         host: host.clone(),
         path: None,
     };
-    let result: anyhow::Result<serde_json::Value> =
-        super::emit(&[target], &AlwaysOkExec, &DenyConfirmer, "cat", &[], None).await;
+    let result: anyhow::Result<serde_json::Value> = super::emit(
+        &[target],
+        Arc::new(AlwaysOkExec),
+        &DenyConfirmer,
+        "cat",
+        &[],
+        None,
+    )
+    .await;
     assert!(result.is_err(), "declined emit must produce error");
 }
 
@@ -187,7 +203,7 @@ async fn emit_rejects_non_allowlisted_command() {
     };
     let result: anyhow::Result<serde_json::Value> = super::emit(
         &[target],
-        &AlwaysOkExec,
+        Arc::new(AlwaysOkExec),
         &ApproveConfirmer,
         "bash",
         &[],
@@ -199,24 +215,11 @@ async fn emit_rejects_non_allowlisted_command() {
 
 #[tokio::test]
 async fn emit_returns_partial_success_on_mixed() {
-    // Use two local hosts: one "ok" (uses AlwaysOkExec path), one that will
-    // fail at validation because the host allowlist blocks the command.
+    // One local host (runs cat locally — succeeds) + one SSH-protocol host
+    // (uses AlwaysFailExec — fails). This should produce PartialSuccess.
     let mut host_ok = HostConfig::local();
     host_ok.name = "host-ok".into();
 
-    // Second host has an empty allowlist that doesn't extend global; command
-    // 'cat' IS in the global list so both succeed with AlwaysOkExec.
-    // To produce a failure, we simulate a host that doesn't exist so SSH fails.
-    // Use an SSH-protocol host to trigger failure path.
-    let mut host_fail = HostConfig::local();
-    host_fail.name = "host-fail".into();
-    // We'll test partial success by having one target with a bad command.
-    // Actually — create two targets with valid commands and use AlwaysFailExec
-    // to drive one to fail. But AlwaysFailExec is a single instance...
-
-    // Simpler: emit two targets, use `AlwaysFailExec` for executor so
-    // both remote exec calls fail. Since both are "local" hosts, the Command
-    // subprocess runs and cat succeeds. So use non-local host to go through SSH path.
     let mut ssh_host = HostConfig::local();
     ssh_host.name = "ssh-remote".into();
     ssh_host.protocol = crate::synapse::HostProtocol::Ssh;
@@ -233,24 +236,71 @@ async fn emit_returns_partial_success_on_mixed() {
         },
     ];
 
-    // AlwaysFailExec makes the SSH call fail for the remote host.
+    // AlwaysFailExec causes the SSH host to error; local host runs cat natively.
     let result: serde_json::Value = super::emit(
         &targets,
-        &AlwaysFailExec,
+        Arc::new(AlwaysFailExec),
         &ApproveConfirmer,
         "cat",
         &[],
         Some(5),
     )
     .await
-    .expect("emit itself should not error — partial success is a valid outcome");
+    .expect("emit should not error — partial_success is a valid return");
 
-    // One local host succeeded (spawned cat locally), one SSH host failed.
+    // Exactly partial_success: one ok (local cat), one fail (SSH exec error).
     let status = result["status"].as_str().unwrap_or("");
-    assert!(
-        status == "partial_success" || status == "all_ok" || status == "all_failed",
-        "status should be a valid fanout result: {status}"
+    assert_eq!(
+        status, "partial_success",
+        "expected partial_success, got: {result}"
     );
-    // The key invariant: emit does not panic and returns structured results.
+    assert_eq!(result["succeeded"], 1u64, "one local host succeeded");
+    assert_eq!(result["failed"], 1u64, "one SSH host failed");
     assert!(result["results"].is_array(), "results must be an array");
+}
+
+// ─── beam tests ──────────────────────────────────────────────────────────────
+
+#[tokio::test]
+async fn beam_rejects_when_confirmer_declines() {
+    let host = HostConfig::local();
+    let result: anyhow::Result<serde_json::Value> =
+        super::beam(&host, "/tmp/source", &host, "/tmp/dest", &DenyConfirmer).await;
+    assert!(result.is_err(), "declined beam must produce error");
+    let msg = result.unwrap_err().to_string();
+    assert!(
+        msg.contains("declined") || msg.contains("Declined"),
+        "error must mention declined: {msg}"
+    );
+}
+
+#[tokio::test]
+async fn beam_rejects_relative_source_path() {
+    let host = HostConfig::local();
+    let result: anyhow::Result<serde_json::Value> = super::beam(
+        &host,
+        "relative/path",
+        &host,
+        "/tmp/dest",
+        &ApproveConfirmer,
+    )
+    .await;
+    assert!(
+        result.is_err(),
+        "relative source path must be rejected before confirmation"
+    );
+}
+
+#[tokio::test]
+async fn beam_rejects_dotdot_dest_path() {
+    let host = HostConfig::local();
+    let result: anyhow::Result<serde_json::Value> = super::beam(
+        &host,
+        "/tmp/source",
+        &host,
+        "/tmp/../etc/dest",
+        &ApproveConfirmer,
+    )
+    .await;
+    assert!(result.is_err(), "path with .. in dest must be rejected");
 }

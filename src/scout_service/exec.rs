@@ -35,10 +35,13 @@ use std::path::Path;
 use std::process::Command;
 use std::time::Duration;
 
+use std::sync::Arc;
+
 use anyhow::{bail, Result};
 use serde_json::{json, Value};
 
 use crate::elicitation_gate::{ConfirmationDenied, Confirmer};
+use crate::fanout::{fanout, FanoutOutcome};
 use crate::flux_service::host::is_local_host;
 use crate::ssh::SshExecutor;
 use crate::synapse::{validate_command, validate_safe_path, HostConfig};
@@ -141,18 +144,17 @@ pub struct EmitTarget {
     pub path: Option<String>,
 }
 
-/// Run `command` on each `targets` host sequentially with a per-host timeout.
+/// Run `command` on each `targets` host with bounded concurrency (B6 fanout).
 ///
-/// Note: we run sequentially rather than using `fanout` to avoid the lifetime
-/// challenge of sharing `&dyn SshExecutor` across async closures. The bounded
-/// concurrency model from B6 is preserved at the service-layer call site via
-/// the `emit` caller's fanout strategy. The per-host timeout still applies.
+/// Uses `crate::fanout::fanout` with `min(N, 8)` concurrency and a per-host
+/// timeout. The executor is passed as `Arc<dyn SshExecutor>` so it can be
+/// cloned into the fanout closure without unsafe.
 ///
-/// Destructive gate fires ONCE before any execution — one confirmation for the
+/// Destructive gate fires ONCE before the fanout — one confirmation for the
 /// whole multi-host operation.
 pub async fn emit(
     targets: &[EmitTarget],
-    executor: &dyn SshExecutor,
+    executor: Arc<dyn SshExecutor>,
     confirmer: &dyn Confirmer,
     command: &str,
     args: &[String],
@@ -162,7 +164,7 @@ pub async fn emit(
         bail!("emit: targets must not be empty");
     }
 
-    // Pre-validate command name against global allowlist.
+    // Pre-validate command name against the global allowlist before confirmation.
     validate_command(command, &[])?;
 
     let host_names: Vec<String> = targets.iter().map(|t| t.host.name.clone()).collect();
@@ -173,54 +175,55 @@ pub async fn emit(
         .map_err(|e: ConfirmationDenied| anyhow::anyhow!("{e}"))?;
 
     let timeout = Duration::from_secs(timeout_secs.unwrap_or(EMIT_DEFAULT_TIMEOUT_SECS));
-    let arg_strs: Vec<&str> = args.iter().map(|s| s.as_str()).collect();
 
-    let mut results: Vec<Value> = Vec::with_capacity(targets.len());
-    let mut ok_count = 0usize;
-    let mut err_count = 0usize;
+    // Build the host list from targets (fanout works over HostConfig slices).
+    let host_configs: Vec<HostConfig> = targets.iter().map(|t| t.host.clone()).collect();
+    let command_owned = command.to_owned();
+    let args_owned: Vec<String> = args.to_vec();
 
-    for target in targets {
-        // Per-host command validation (host-specific allowlist may extend global).
-        if let Err(e) = validate_command(command, &target.host.exec_allowlist) {
-            results.push(json!({ "host": target.host.name, "ok": false, "error": e.to_string() }));
-            err_count += 1;
-            continue;
+    let outcome: FanoutOutcome<Value, String> = fanout(&host_configs, |host| {
+        let ex = Arc::clone(&executor);
+        let cmd = command_owned.clone();
+        let arg_strs: Vec<String> = args_owned.clone();
+        async move {
+            // Per-host command validation (host-specific allowlist may differ).
+            validate_command(&cmd, &host.exec_allowlist).map_err(|e| e.to_string())?;
+
+            let arg_refs: Vec<&str> = arg_strs.iter().map(|s| s.as_str()).collect();
+
+            let fut = async {
+                if is_local_host(&host) {
+                    exec_local_fanout(&host, &cmd, &arg_refs, None)
+                } else {
+                    exec_remote_fanout(&host, ex.as_ref(), &cmd, &arg_refs).await
+                }
+            };
+
+            tokio::time::timeout(timeout, fut)
+                .await
+                .map_err(|_| format!("timed out after {}s", timeout.as_secs()))?
+                .map_err(|e| e.to_string())
         }
+    })
+    .await;
 
-        let fut = async {
-            if is_local_host(&target.host) {
-                exec_local_fanout(&target.host, command, &arg_strs, None)
-            } else {
-                exec_remote_fanout(&target.host, executor, command, &arg_strs).await
-            }
-        };
+    let total = host_configs.len();
+    let ok_count = outcome.ok_results().len();
+    let err_count = outcome.err_results().len();
 
-        match tokio::time::timeout(timeout, fut).await {
-            Ok(Ok(v)) => {
-                results.push(json!({ "host": target.host.name, "ok": true, "result": v }));
-                ok_count += 1;
-            }
-            Ok(Err(e)) => {
-                results
-                    .push(json!({ "host": target.host.name, "ok": false, "error": e.to_string() }));
-                err_count += 1;
-            }
-            Err(_) => {
-                results.push(json!({ "host": target.host.name, "ok": false, "error": format!("timed out after {}s", timeout.as_secs()) }));
-                err_count += 1;
-            }
-        }
-    }
-
-    let total = targets.len();
-
-    let status = if err_count == 0 {
-        "all_ok"
-    } else if ok_count == 0 {
-        "all_failed"
-    } else {
-        "partial_success"
+    let status = match &outcome {
+        FanoutOutcome::AllOk(_) => "all_ok",
+        FanoutOutcome::PartialSuccess { .. } => "partial_success",
+        FanoutOutcome::AllFailed(_) => "all_failed",
     };
+
+    let mut results: Vec<Value> = Vec::with_capacity(total);
+    for (host, v) in outcome.ok_results() {
+        results.push(json!({ "host": host, "ok": true, "result": v }));
+    }
+    for (host, e) in outcome.err_results() {
+        results.push(json!({ "host": host, "ok": false, "error": e }));
+    }
 
     Ok(json!({
         "command": command,

@@ -194,13 +194,18 @@ pub async fn delta(
 ) -> Result<Value> {
     validate_safe_path(source_path)?;
 
-    // Read source file.
-    let source_content = read_remote_file(source_host, executor, source_path).await?;
-    let source_label = format!("{}:{}", source_host.name, source_path);
+    // VALIDATION FIRST — content size checked before any IO.
+    if let Some(inline) = content {
+        if inline.len() > DELTA_MAX_CONTENT_BYTES {
+            bail!("delta content exceeds 1 MB limit");
+        }
+    }
 
     match (target_host, target_path, content) {
         (Some(th), Some(tp), None) => {
             validate_safe_path(tp)?;
+            let source_content = read_remote_file(source_host, executor, source_path).await?;
+            let source_label = format!("{}:{}", source_host.name, source_path);
             let target_content = read_remote_file(th, executor, tp).await?;
             let target_label = format!("{}:{}", th.name, tp);
             let diff = compute_diff(
@@ -217,9 +222,8 @@ pub async fn delta(
             }))
         }
         (None, None, Some(inline)) => {
-            if inline.len() > DELTA_MAX_CONTENT_BYTES {
-                bail!("delta content exceeds 1 MB limit");
-            }
+            let source_content = read_remote_file(source_host, executor, source_path).await?;
+            let source_label = format!("{}:{}", source_host.name, source_path);
             let diff = compute_diff(&source_content, inline, &source_label, "inline");
             Ok(json!({
                 "identical": diff.is_empty(),

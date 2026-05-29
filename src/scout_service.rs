@@ -181,7 +181,7 @@ impl ScoutService {
     ) -> Result<Value> {
         exec::emit(
             targets,
-            self.ssh_pool.as_ref(),
+            Arc::clone(&self.ssh_pool),
             confirmer,
             command,
             args,

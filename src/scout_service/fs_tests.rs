@@ -52,6 +52,9 @@ fn diff_different_files_non_empty() {
 
 #[tokio::test]
 async fn delta_rejects_content_over_1mb() {
+    // Content size check fires BEFORE any IO (validate_safe_path runs first,
+    // then the content-size guard, then the source-file read).
+    // The test verifies the size guard fires before the IO path.
     use crate::ssh::{CommandOutput, SshExecutor};
     use async_trait::async_trait;
 
@@ -64,36 +67,31 @@ async fn delta_rejects_content_over_1mb() {
             _program: &str,
             _args: &[&str],
         ) -> anyhow::Result<CommandOutput> {
-            Ok(CommandOutput {
-                stdout: String::new(),
-                stderr: String::new(),
-                exit_code: Some(0),
-            })
+            // If this is called the test has failed: content check should fire first.
+            panic!("IO should not be reached when content exceeds 1 MB");
         }
     }
 
-    // Source host local (won't be reached — content validation fires first).
     let host = HostConfig::local();
     let big_content = "x".repeat(DELTA_MAX_CONTENT_BYTES + 1);
 
-    // delta is called with a local path that doesn't exist; the content limit
-    // fires before the file read on a real path, but here path validation would
-    // fail first if the path isn't absolute. Use a valid-looking absolute path.
-    // The test exercises the content-length check, not the fs read.
-    let _result = delta(
+    // Use a syntactically valid absolute path. The content-size check runs
+    // before read_remote_file, so the source need not exist.
+    let result = delta(
         &host,
         &EchoExec,
-        "/tmp/test_file", // syntactically valid (even if not on disk for this test path)
+        "/tmp/synapse2_test_source",
         None,
         None,
         Some(&big_content),
     )
     .await;
 
-    // The direct content size check verifies the limit constant is correct.
+    assert!(result.is_err(), "delta must reject content > 1 MB");
+    let msg = result.unwrap_err().to_string();
     assert!(
-        big_content.len() > DELTA_MAX_CONTENT_BYTES,
-        "test content must exceed limit"
+        msg.contains("1 MB") || msg.contains("content"),
+        "error must mention content limit: {msg}"
     );
 }
 
