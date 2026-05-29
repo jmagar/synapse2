@@ -16,14 +16,14 @@
 #     (no PATH)  -> checks every tracked + untracked .rs file (CI / `just`)
 #     (PATH ...) -> checks only those files/dirs (lefthook staged files)
 #
-# Default limit: 420 real-code lines. Lands green on the current tree (largest
-# modules: ssh.rs ~403, app.rs ~386) while still forcing the FluxService /
-# ScoutService split instead of growing a god-object. Ratchet: 420 -> 400 once
-# ssh.rs is split, -> 300 once the flux/scout split shrinks the facade.
+# Default limit: 400 real-code lines. docker_client.rs, SynapseService, and ssh.rs
+# have all been split into focused submodules, so the tree is green at 400.
+# Next ratchet target: 300 (current blockers: cli.rs ~326, actions.rs ~317,
+# xtask/main.rs ~320, xtask/patterns/checks.rs ~311 — split those, then drop to 300).
 # =============================================================================
 set -euo pipefail
 
-limit=420
+limit=400
 self_test=0
 
 while [[ $# -gt 0 ]]; do

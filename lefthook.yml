@@ -58,7 +58,7 @@ pre-commit:
 
     # ── 4. file_size ──────────────────────────────────────────────────────────
     # NO MONOLITHS: blocks staged production source files that exceed line budgets.
-    # Rust (.rs) -> check-rust-module-size.sh (420 real-code LOC); TS -> check-file-size.sh.
+    # Rust (.rs) -> check-rust-module-size.sh (400 real-code LOC); TS -> check-file-size.sh.
     # Test files are exempt. Each script ignores files it does not own.
     file_size:
       glob: "**/*.{rs,ts,tsx}"
