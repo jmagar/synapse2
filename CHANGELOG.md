@@ -15,6 +15,48 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Reached full synapse-mcp parity (B17)** — all 59 production actions from
+  `synapse-mcp/docs/INVENTORY.md` are now implemented and verified in synapse2:
+
+  **`flux docker`** (9 actions): `info`, `df`, `images`, `networks`, `volumes`,
+  `pull`, `build`, `rmi`, `prune` — full Docker daemon management including
+  destructive image/resource operations (B10).
+
+  **`flux container`** (14 actions): `list`, `inspect`, `logs`, `stats`, `top`,
+  `search` (read-only, B8) + `start`, `stop`, `restart`, `pause`, `resume`,
+  `pull`, `recreate`, `exec` (lifecycle, B9) — full container lifecycle with
+  B5 Confirmer gate for destructive ops.
+
+  **`flux host`** (9 actions): `status`, `info`, `uptime`, `resources`,
+  `services`, `network`, `mounts`, `ports`, `doctor` — host-level inspection
+  including systemd services and port mappings (B11).
+
+  **`flux compose`** (10 actions): `list`, `status`, `up`, `down`, `restart`,
+  `recreate`, `logs`, `build`, `pull`, `refresh` — full Compose project
+  management with per-project and per-service scope (B12 + B13).
+
+  **`scout` simple actions** (9 actions): `nodes`, `peek`, `find`, `ps`, `df`,
+  `delta`, `exec`, `emit`, `beam` — SSH/local host inspection and guarded
+  command execution with the exec allowlist and B5 gating (B14).
+
+  **`scout zfs`** (3 subactions): `pools`, `datasets`, `snapshots` — read-only
+  ZFS introspection via SSH (B15).
+
+  **`scout logs`** (4 subactions): `syslog`, `journal`, `dmesg`, `auth` —
+  remote log retrieval with local grep filtering (B15).
+
+  **`flux help` + `scout help`** — topic-aware per-subaction documentation with
+  `topic` and `format` params; 59 help topics in `src/mcp/help.rs` (B16).
+
+  Parity is now automatically verified by `tests/parity.rs`, which parses
+  `../synapse-mcp/docs/INVENTORY.md` and asserts every row is covered by
+  `ACTION_SPECS` and the help map. Skips gracefully if the sibling repo is
+  absent. Run with:
+  ```
+  cargo test --test parity -- --nocapture
+  ```
+  Expected output: `synapse-mcp parity: 61 rows parsed → 61 matched, 0 missing`
+
 - **MCP resources expansion + topic-aware help (B16)**:
   - `list_resources` now returns 6 URIs: `synapse://schema/flux`, `synapse://schema/scout`, `synapse://hosts`, `synapse://compose/projects`, `synapse://help/flux`, `synapse://help/scout`.
   - `read_resource` delegates to new `src/mcp/resources.rs` which serves all 6 resources. Schema resources return full tool JSON schemas; hosts/compose return live data from host repo and ComposeDiscovery cache; help resources return full per-domain markdown.
