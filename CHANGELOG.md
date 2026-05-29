@@ -13,6 +13,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 <!-- TEMPLATE: Add changes here as you work. They move to a version section on release. -->
 
+### Added
+
+- **flux container read-only ops (B8)** — replaced the local-`docker`-CLI stubs for `list`/`inspect`/`logs` with bollard-backed implementations and added `stats`, `top`, and `search`, all reachable from both MCP (`flux` tool) and CLI (`synapse2 flux container …`):
+  - `list` — filters: `state` (running/exited/paused/restarting/all), `name_filter`, `image_filter` (case-insensitive substring), `label_filter` (`key=value`, bollard server-side).
+  - `logs` — one-shot tail (`follow=false`); `lines` (1–500, default 50), `since`/`until` (ISO 8601, unix seconds, or relative `"1h"`/`"30m"`), `grep` (substring filter on lines), `stream` (stdout/stderr/both).
+  - `inspect` — `summary` flag for abbreviated output.
+  - `stats` — one-shot resource stats for one container, or all containers on the host(s) when `container_id` is omitted.
+  - `top` — running processes (bollard-wrapped `docker top`).
+  - `search` — full-text substring match over container name + image + labels (client-side grep, not a bollard server-side filter).
+  - Multi-host behavior: `list`/`search`/`stats(no id)` fan out across all configured hosts and return a flat, host-tagged list with a `partial` flag and per-host `errors`; `inspect`/`logs`/`top` target a named host or fan out to find the owning host (first match wins).
+  - `response_format` (`markdown`/`json`) is validated at the shim per the B4 contract; output-rendering wiring remains a separate codebase-wide concern (actions return structured JSON today).
+- `src/flux_service/container_read.rs` (+ `_tests.rs`) — pure per-host container ops over `&dyn ContainerOps`, fully unit-testable with `MockDockerClient` (no live daemon). Includes `parse_time_spec` for log time ranges.
+- `MockDockerClient` gains scriptable `log_frames` / `stats_frames` fields for B8 streaming tests.
+- `ContainerArgs` — shared boxed parameter struct for `flux container` subactions, used by both `SynapseAction::FluxContainer` and the CLI `Command`.
+
 ## [0.5.0] — 2026-05-28
 
 ### Added

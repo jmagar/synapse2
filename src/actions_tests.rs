@@ -51,20 +51,58 @@ fn parses_flux_actions() {
             subaction: "info".into()
         }
     );
-    assert_eq!(
-        SynapseAction::from_flux_args(&json!({
-            "action":"container",
-            "subaction":"logs",
-            "container_id":"abc",
-            "lines":20
-        }))
-        .unwrap(),
-        SynapseAction::FluxContainer {
-            subaction: "logs".into(),
-            container_id: Some("abc".into()),
-            lines: Some(20),
+    let logs = SynapseAction::from_flux_args(&json!({
+        "action":"container",
+        "subaction":"logs",
+        "container_id":"abc",
+        "lines":20
+    }))
+    .unwrap();
+    match logs {
+        SynapseAction::FluxContainer(args) => {
+            assert_eq!(args.subaction, "logs");
+            assert_eq!(args.container_id.as_deref(), Some("abc"));
+            assert_eq!(args.lines, Some(20));
         }
-    );
+        other => panic!("expected FluxContainer, got {other:?}"),
+    }
+}
+
+#[test]
+fn parses_container_list_filters() {
+    let action = SynapseAction::from_flux_args(&json!({
+        "action": "container",
+        "subaction": "list",
+        "host": "dookie",
+        "state": "running",
+        "name_filter": "nginx",
+        "image_filter": "nginx",
+        "label_filter": "tier=edge",
+        "response_format": "json"
+    }))
+    .unwrap();
+    match action {
+        SynapseAction::FluxContainer(args) => {
+            assert_eq!(args.subaction, "list");
+            assert_eq!(args.host.as_deref(), Some("dookie"));
+            assert_eq!(args.state.as_deref(), Some("running"));
+            assert_eq!(args.name_filter.as_deref(), Some("nginx"));
+            assert_eq!(args.image_filter.as_deref(), Some("nginx"));
+            assert_eq!(args.label_filter.as_deref(), Some("tier=edge"));
+        }
+        other => panic!("expected FluxContainer, got {other:?}"),
+    }
+}
+
+#[test]
+fn rejects_invalid_response_format_on_container() {
+    let err = SynapseAction::from_flux_args(&json!({
+        "action": "container",
+        "subaction": "list",
+        "response_format": "xml"
+    }))
+    .unwrap_err();
+    assert!(err.to_string().contains("response_format") || err.to_string().contains("xml"));
 }
 
 #[test]

@@ -95,11 +95,14 @@ fn rest_action_from_request(action: &str, params: &Value) -> Result<SynapseActio
         "flux.docker.volumes" => Ok(SynapseAction::FluxDocker {
             subaction: "volumes".into(),
         }),
-        "flux.container.list" => Ok(SynapseAction::FluxContainer {
-            subaction: "list".into(),
-            container_id: None,
-            lines: None,
-        }),
+        "flux.container.list" => {
+            // Merge caller params (may be null/absent) into the flux arg shape so
+            // REST honors the same list filters as MCP/CLI.
+            let mut obj = params.as_object().cloned().unwrap_or_default();
+            obj.insert("action".into(), json!("container"));
+            obj.insert("subaction".into(), json!("list"));
+            SynapseAction::from_flux_args(&Value::Object(obj))
+        }
         "scout.nodes" => Ok(SynapseAction::ScoutNodes),
         "scout.peek" => Ok(SynapseAction::from_scout_args(&json!({
             "action": "peek",

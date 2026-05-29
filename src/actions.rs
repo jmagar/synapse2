@@ -165,17 +165,40 @@ fn action_spec(action: &str) -> Option<&'static ActionSpec> {
     ACTION_SPECS.iter().find(|spec| spec.name == action)
 }
 
+/// Parsed parameters for `flux container` subactions.
+///
+/// Boxed inside [`SynapseAction::FluxContainer`] (and mirrored by the CLI
+/// `Command`) so the enum stays small — every read-only container subaction's
+/// params live here. Extraction stays in the shim; logic lives in `FluxService`.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct ContainerArgs {
+    pub subaction: String,
+    pub container_id: Option<String>,
+    pub host: Option<String>,
+    pub lines: Option<u32>,
+    // list filters
+    pub state: Option<String>,
+    pub name_filter: Option<String>,
+    pub image_filter: Option<String>,
+    pub label_filter: Option<String>,
+    // logs params
+    pub since: Option<String>,
+    pub until: Option<String>,
+    pub grep: Option<String>,
+    pub stream: Option<String>,
+    // inspect param
+    pub summary: Option<bool>,
+    // search param
+    pub query: Option<String>,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum SynapseAction {
     FluxHelp,
     FluxDocker {
         subaction: String,
     },
-    FluxContainer {
-        subaction: String,
-        container_id: Option<String>,
-        lines: Option<u32>,
-    },
+    FluxContainer(Box<ContainerArgs>),
     FluxHost {
         subaction: String,
         host: Option<String>,
@@ -198,7 +221,7 @@ impl SynapseAction {
         match self {
             Self::FluxHelp | Self::ScoutHelp => "help",
             Self::FluxDocker { .. } => "docker",
-            Self::FluxContainer { .. } => "container",
+            Self::FluxContainer(_) => "container",
             Self::FluxHost { .. } => "host",
             Self::ScoutNodes => "nodes",
             Self::ScoutPeek { .. } => "peek",
@@ -216,11 +239,31 @@ impl SynapseAction {
             "docker" => Ok(Self::FluxDocker {
                 subaction: required_string_param(args, "subaction")?,
             }),
-            "container" => Ok(Self::FluxContainer {
-                subaction: required_string_param(args, "subaction")?,
-                container_id: optional_string_param(args, "container_id")?,
-                lines: optional_u32_param(args, "lines")?,
-            }),
+            "container" => {
+                // Validate `response_format` at the shim per B4 contract (no-op
+                // on output shape today; full rendering wiring is a separate
+                // codebase-wide concern). Invalid value → hard error.
+                if let Some(rf) = optional_string_param(args, "response_format")? {
+                    crate::formatters::ResponseFormat::parse(Some(&rf))
+                        .map_err(|e| anyhow::anyhow!(e))?;
+                }
+                Ok(Self::FluxContainer(Box::new(ContainerArgs {
+                    subaction: required_string_param(args, "subaction")?,
+                    container_id: optional_string_param(args, "container_id")?,
+                    host: optional_string_param(args, "host")?,
+                    lines: optional_u32_param(args, "lines")?,
+                    state: optional_string_param(args, "state")?,
+                    name_filter: optional_string_param(args, "name_filter")?,
+                    image_filter: optional_string_param(args, "image_filter")?,
+                    label_filter: optional_string_param(args, "label_filter")?,
+                    since: optional_string_param(args, "since")?,
+                    until: optional_string_param(args, "until")?,
+                    grep: optional_string_param(args, "grep")?,
+                    stream: optional_string_param(args, "stream")?,
+                    summary: optional_bool_param(args, "summary")?,
+                    query: optional_string_param(args, "query")?,
+                })))
+            }
             "host" => Ok(Self::FluxHost {
                 subaction: required_string_param(args, "subaction")?,
                 host: optional_string_param(args, "host")?,
@@ -273,40 +316,7 @@ pub async fn execute_service_action(
             }
             .into()),
         },
-        SynapseAction::FluxContainer {
-            subaction,
-            container_id,
-            lines,
-        } => match subaction.as_str() {
-            "list" => service.flux().container_list().await,
-            "inspect" => {
-                service
-                    .flux()
-                    .container_inspect(container_id.as_deref().ok_or_else(|| {
-                        ValidationError::MissingField {
-                            field: "container_id".into(),
-                        }
-                    })?)
-                    .await
-            }
-            "logs" => {
-                service
-                    .flux()
-                    .container_logs(
-                        container_id
-                            .as_deref()
-                            .ok_or_else(|| ValidationError::MissingField {
-                                field: "container_id".into(),
-                            })?,
-                        lines.unwrap_or(50),
-                    )
-                    .await
-            }
-            other => Err(ValidationError::UnknownAction {
-                action: format!("container:{other}"),
-            }
-            .into()),
-        },
+        SynapseAction::FluxContainer(args) => dispatch_flux_container(service, args).await,
         SynapseAction::FluxHost { subaction, host } => match subaction.as_str() {
             "status" => service.flux().host_status(host.as_deref()).await,
             other => Err(ValidationError::UnknownAction {
@@ -322,6 +332,64 @@ pub async fn execute_service_action(
             path,
             command,
         } => service.scout().exec(host, path, command).await,
+    }
+}
+
+/// Dispatch a `flux container` read-only subaction to the [`FluxService`].
+///
+/// Thin: extracts the parsed [`ContainerArgs`] and calls the matching service
+/// method. All filtering/fanout logic lives in `FluxService` / `container_read`.
+async fn dispatch_flux_container(service: &SynapseService, args: &ContainerArgs) -> Result<Value> {
+    use crate::flux_service::container_read::{ListFilters, LogOptions, DEFAULT_LOG_LINES};
+    let flux = service.flux();
+    let host = args.host.as_deref();
+    match args.subaction.as_str() {
+        "list" => {
+            let filters = ListFilters {
+                state: args.state.clone(),
+                name_filter: args.name_filter.clone(),
+                image_filter: args.image_filter.clone(),
+                label_filter: args.label_filter.clone(),
+            };
+            flux.container_list(host, filters).await
+        }
+        "search" => {
+            let q = args.query.as_deref().ok_or(ValidationError::MissingField {
+                field: "query".into(),
+            })?;
+            flux.container_search(host, q).await
+        }
+        "stats" => {
+            flux.container_stats(host, args.container_id.as_deref())
+                .await
+        }
+        "inspect" => {
+            flux.container_inspect(
+                host,
+                require_container_id(&args.container_id)?,
+                args.summary.unwrap_or(false),
+            )
+            .await
+        }
+        "top" => {
+            flux.container_top(host, require_container_id(&args.container_id)?)
+                .await
+        }
+        "logs" => {
+            let opts = LogOptions {
+                lines: args.lines.unwrap_or(DEFAULT_LOG_LINES),
+                since: args.since.clone(),
+                until: args.until.clone(),
+                grep: args.grep.clone(),
+                stream: args.stream.clone().unwrap_or_else(|| "both".to_owned()),
+            };
+            flux.container_logs(host, require_container_id(&args.container_id)?, opts)
+                .await
+        }
+        other => Err(ValidationError::UnknownAction {
+            action: format!("container:{other}"),
+        }
+        .into()),
     }
 }
 
@@ -349,6 +417,29 @@ fn optional_string_param(params: &Value, name: &str) -> Result<Option<String>> {
         Some(value) => value
             .as_str()
             .map(|s| Some(s.to_owned()))
+            .ok_or_else(|| ValidationError::WrongType { field: name.into() }.into()),
+    }
+}
+
+/// Require a `container_id` for single-container subactions.
+fn require_container_id(container_id: &Option<String>) -> Result<&str> {
+    container_id
+        .as_deref()
+        .filter(|s| !s.is_empty())
+        .ok_or_else(|| {
+            ValidationError::MissingField {
+                field: "container_id".into(),
+            }
+            .into()
+        })
+}
+
+fn optional_bool_param(params: &Value, name: &str) -> Result<Option<bool>> {
+    match params.get(name) {
+        None => Ok(None),
+        Some(value) => value
+            .as_bool()
+            .map(Some)
             .ok_or_else(|| ValidationError::WrongType { field: name.into() }.into()),
     }
 }

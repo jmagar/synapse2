@@ -39,6 +39,15 @@ pub struct MockDockerClient {
     pub inspect: std::collections::HashMap<String, ContainerInspectResponse>,
     /// Optional canned top output keyed by name.
     pub top: std::collections::HashMap<String, ContainerTopResponse>,
+    /// Optional canned log frames replayed by [`ContainerOps::logs`] (B8 tests).
+    /// Each entry is one `LogOutput` frame; the default empty stream is used
+    /// when this is empty.
+    pub log_frames: Vec<LogOutput>,
+    /// Optional canned stats frames replayed by [`ContainerOps::stats`].
+    pub stats_frames: Vec<ContainerStatsResponse>,
+    /// When true, [`ContainerOps::logs`] yields a single 404 error frame
+    /// (simulates a missing container so find-host advances). B8 tests.
+    pub logs_error: bool,
     /// Records every lifecycle action requested, for assertions.
     pub actions: std::sync::Mutex<Vec<(String, ContainerAction)>>,
 }
@@ -80,7 +89,16 @@ impl ContainerOps for MockDockerClient {
     }
 
     fn logs(&self, _name: &str, _options: Option<LogsOptions>) -> BoxStream<LogOutput> {
-        Box::pin(futures_util::stream::empty())
+        if self.logs_error {
+            let err = bollard::errors::Error::DockerResponseServerError {
+                status_code: 404,
+                message: "no such container".into(),
+            };
+            return Box::pin(futures_util::stream::iter(vec![Err(err)]));
+        }
+        let frames: Vec<Result<LogOutput, bollard::errors::Error>> =
+            self.log_frames.iter().cloned().map(Ok).collect();
+        Box::pin(futures_util::stream::iter(frames))
     }
 
     fn stats(
@@ -88,7 +106,9 @@ impl ContainerOps for MockDockerClient {
         _name: &str,
         _options: Option<StatsOptions>,
     ) -> BoxStream<ContainerStatsResponse> {
-        Box::pin(futures_util::stream::empty())
+        let frames: Vec<Result<ContainerStatsResponse, bollard::errors::Error>> =
+            self.stats_frames.iter().cloned().map(Ok).collect();
+        Box::pin(futures_util::stream::iter(frames))
     }
 
     async fn container_action(

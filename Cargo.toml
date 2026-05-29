@@ -104,6 +104,9 @@ test-support = []
 
 [dev-dependencies]
 synapse2 = { path = ".", features = ["test-support"] }
+# Bytes is bollard's payload type for LogOutput frames; needed to construct
+# canned log frames in B8 container_read unit tests.
+bytes = "1"
 tempfile = "3"
 tower = { version = "0.5", features = ["util"] }
 rmcp = { version = "1.7.0", default-features = false, features = [

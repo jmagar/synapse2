@@ -14,7 +14,10 @@
 //! ```
 
 use crate::{
-    actions::rest_help, app::SynapseService, config::SynapseConfig, synapse2::SynapseClient,
+    actions::{rest_help, ContainerArgs},
+    app::SynapseService,
+    config::SynapseConfig,
+    synapse2::SynapseClient,
 };
 use anyhow::{anyhow, Result};
 
@@ -31,9 +34,13 @@ pub const USAGE: &str = "Usage:
   synapse2 mcp              Start MCP stdio transport
 
   synapse2 flux docker info|images|networks|volumes
-  synapse2 flux container list
-  synapse2 flux container inspect --container-id ID
-  synapse2 flux container logs --container-id ID [--lines N]
+  synapse2 flux container list [--host H] [--state S] [--name-filter N] [--image-filter I] [--label-filter K=V]
+  synapse2 flux container inspect --container-id ID [--host H] [--summary]
+  synapse2 flux container logs --container-id ID [--host H] [--lines N] [--since T] [--until T] [--grep S] [--stream stdout|stderr|both]
+  synapse2 flux container stats [--container-id ID] [--host H]
+  synapse2 flux container top --container-id ID [--host H]
+  synapse2 flux container search --query Q [--host H]
+    (all flux container subactions also accept [--response-format markdown|json])
   synapse2 flux host status [--host HOST]
   synapse2 scout nodes
   synapse2 scout peek --host HOST --path PATH
@@ -66,11 +73,9 @@ pub enum Command {
     FluxDocker {
         subaction: String,
     },
-    FluxContainer {
-        subaction: String,
-        container_id: Option<String>,
-        lines: Option<u32>,
-    },
+    /// Container read-only subactions. Params are boxed in [`ContainerArgs`]
+    /// (shared with [`crate::actions::SynapseAction`]) so the enum stays small.
+    FluxContainer(Box<ContainerArgs>),
     FluxHost {
         subaction: String,
         host: Option<String>,
@@ -199,35 +204,72 @@ pub async fn run(cmd: Command, cfg: &SynapseConfig) -> Result<()> {
             "volumes" => service.flux().docker_volumes().await?,
             other => return Err(anyhow!("unknown flux docker subaction `{other}`")),
         },
-        Command::FluxContainer {
-            subaction,
-            container_id,
-            lines,
-        } => match subaction.as_str() {
-            "list" => service.flux().container_list().await?,
-            "inspect" => {
-                service
-                    .flux()
-                    .container_inspect(
-                        container_id
-                            .as_deref()
-                            .ok_or_else(|| anyhow!("container inspect requires --container-id"))?,
-                    )
-                    .await?
+        Command::FluxContainer(args) => {
+            use crate::flux_service::container_read::{ListFilters, LogOptions, DEFAULT_LOG_LINES};
+            let ContainerArgs {
+                subaction,
+                container_id,
+                host,
+                lines,
+                state,
+                name_filter,
+                image_filter,
+                label_filter,
+                since,
+                until,
+                grep,
+                stream,
+                summary,
+                query,
+            } = args.as_ref();
+            let flux = service.flux();
+            let host = host.as_deref();
+            match subaction.as_str() {
+                "list" => {
+                    let filters = ListFilters {
+                        state: state.clone(),
+                        name_filter: name_filter.clone(),
+                        image_filter: image_filter.clone(),
+                        label_filter: label_filter.clone(),
+                    };
+                    flux.container_list(host, filters).await?
+                }
+                "search" => {
+                    let q = query
+                        .as_deref()
+                        .ok_or_else(|| anyhow!("container search requires --query"))?;
+                    flux.container_search(host, q).await?
+                }
+                "stats" => flux.container_stats(host, container_id.as_deref()).await?,
+                "inspect" => {
+                    let id = container_id
+                        .as_deref()
+                        .ok_or_else(|| anyhow!("container inspect requires --container-id"))?;
+                    flux.container_inspect(host, id, summary.unwrap_or(false))
+                        .await?
+                }
+                "top" => {
+                    let id = container_id
+                        .as_deref()
+                        .ok_or_else(|| anyhow!("container top requires --container-id"))?;
+                    flux.container_top(host, id).await?
+                }
+                "logs" => {
+                    let id = container_id
+                        .as_deref()
+                        .ok_or_else(|| anyhow!("container logs requires --container-id"))?;
+                    let opts = LogOptions {
+                        lines: lines.unwrap_or(DEFAULT_LOG_LINES),
+                        since: since.clone(),
+                        until: until.clone(),
+                        grep: grep.clone(),
+                        stream: stream.clone().unwrap_or_else(|| "both".to_owned()),
+                    };
+                    flux.container_logs(host, id, opts).await?
+                }
+                other => return Err(anyhow!("unknown flux container subaction `{other}`")),
             }
-            "logs" => {
-                service
-                    .flux()
-                    .container_logs(
-                        container_id
-                            .as_deref()
-                            .ok_or_else(|| anyhow!("container logs requires --container-id"))?,
-                        lines.unwrap_or(50),
-                    )
-                    .await?
-            }
-            other => return Err(anyhow!("unknown flux container subaction `{other}`")),
-        },
+        }
         Command::FluxHost { subaction, host } => match subaction.as_str() {
             "status" => service.flux().host_status(host.as_deref()).await?,
             other => return Err(anyhow!("unknown flux host subaction `{other}`")),
@@ -267,16 +309,37 @@ fn parse_flux(args: &[String]) -> Result<Command> {
             subaction: subaction.clone(),
         }),
         [group, subaction, rest @ ..] if group == "container" => {
-            let container_id = parse_optional_named_value(rest, "--container-id")?;
-            let lines = parse_optional_named_value(rest, "--lines")?
+            // `--summary` is a valueless bool flag; split it out before the
+            // value-pair parser (which requires a value after every flag).
+            let summary = rest.iter().any(|a| a == "--summary");
+            let value_args: Vec<String> =
+                rest.iter().filter(|a| *a != "--summary").cloned().collect();
+            let container_id = parse_optional_named_value(&value_args, "--container-id")?;
+            let lines = parse_optional_named_value(&value_args, "--lines")?
                 .map(|value| value.parse())
                 .transpose()
                 .map_err(|_| anyhow!("--lines must be an integer"))?;
-            Ok(Command::FluxContainer {
+            // Validate `--response-format` for MCP/CLI parity (output stays JSON
+            // for the CLI today; an invalid value is still a hard error).
+            if let Some(rf) = parse_optional_named_value(&value_args, "--response-format")? {
+                crate::formatters::ResponseFormat::parse(Some(&rf)).map_err(|e| anyhow!(e))?;
+            }
+            Ok(Command::FluxContainer(Box::new(ContainerArgs {
                 subaction: subaction.clone(),
                 container_id,
+                host: parse_optional_named_value(&value_args, "--host")?,
                 lines,
-            })
+                state: parse_optional_named_value(&value_args, "--state")?,
+                name_filter: parse_optional_named_value(&value_args, "--name-filter")?,
+                image_filter: parse_optional_named_value(&value_args, "--image-filter")?,
+                label_filter: parse_optional_named_value(&value_args, "--label-filter")?,
+                since: parse_optional_named_value(&value_args, "--since")?,
+                until: parse_optional_named_value(&value_args, "--until")?,
+                grep: parse_optional_named_value(&value_args, "--grep")?,
+                stream: parse_optional_named_value(&value_args, "--stream")?,
+                summary: summary.then_some(true),
+                query: parse_optional_named_value(&value_args, "--query")?,
+            })))
         }
         [group, subaction, rest @ ..] if group == "host" => Ok(Command::FluxHost {
             subaction: subaction.clone(),

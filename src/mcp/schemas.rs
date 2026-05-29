@@ -27,15 +27,29 @@ fn build_tool_definitions() -> Vec<Value> {
     vec![
         json!({
             "name": "flux",
-            "description": "Docker infrastructure management for synapse2. First slice supports read-only docker, container, and host status actions.",
+            "description": "Docker infrastructure management for synapse2. Supports read-only docker, container (list/inspect/logs/stats/top/search), and host status actions across one or all configured hosts.",
             "inputSchema": {
                 "type": "object",
                 "properties": {
                     "action": { "type": "string", "enum": ["help", "docker", "container", "host"] },
-                    "subaction": { "type": "string" },
-                    "host": { "type": "string" },
-                    "container_id": { "type": "string" },
-                    "lines": { "type": "integer", "minimum": 1, "maximum": 500 }
+                    "subaction": {
+                        "type": "string",
+                        "description": "For action=container: list|inspect|logs|stats|top|search. For action=docker: info|images|networks|volumes. For action=host: status."
+                    },
+                    "host": { "type": "string", "description": "Target host name; omit to fan out across all configured hosts." },
+                    "container_id": { "type": "string", "description": "Container id or name (required for inspect/logs/top; optional for stats)." },
+                    "lines": { "type": "integer", "minimum": 1, "maximum": 500, "description": "container logs: tail line count (default 50)." },
+                    "state": { "type": "string", "enum": ["running", "exited", "paused", "restarting", "all"], "description": "container list: filter by state (default all)." },
+                    "name_filter": { "type": "string", "description": "container list: partial match on container name." },
+                    "image_filter": { "type": "string", "description": "container list: partial match on image." },
+                    "label_filter": { "type": "string", "description": "container list: label match in key=value form." },
+                    "since": { "type": "string", "description": "container logs: ISO 8601 timestamp, unix seconds, or relative (e.g. \"1h\")." },
+                    "until": { "type": "string", "description": "container logs: same forms as since." },
+                    "grep": { "type": "string", "description": "container logs: keep only lines containing this substring." },
+                    "stream": { "type": "string", "enum": ["stdout", "stderr", "both"], "description": "container logs: which stream(s) to read (default both)." },
+                    "summary": { "type": "boolean", "description": "container inspect: true = abbreviated info only." },
+                    "query": { "type": "string", "description": "container search: full-text query over name + image + labels." },
+                    "response_format": { "type": "string", "enum": ["markdown", "json"], "description": "Output format (default markdown)." }
                 },
                 "required": ["action"],
                 "additionalProperties": false
