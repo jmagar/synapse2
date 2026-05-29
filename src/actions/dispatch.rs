@@ -13,6 +13,7 @@ use super::flux::{
     dispatch_flux_compose, dispatch_flux_container, dispatch_flux_docker, dispatch_flux_host,
 };
 use super::SynapseAction;
+use crate::actions::scout::{dispatch_scout_logs, dispatch_scout_zfs};
 
 /// Single dispatch hub used by both the MCP tool shim and the REST/CLI layer.
 ///
@@ -101,6 +102,8 @@ pub async fn execute_service_action(
                 )
                 .await
         }
+        SynapseAction::ScoutZfs(a) => dispatch_scout_zfs(service, a).await,
+        SynapseAction::ScoutLogs(a) => dispatch_scout_logs(service, a).await,
     }
 }
 

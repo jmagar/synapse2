@@ -74,13 +74,17 @@ fn build_tool_definitions() -> Vec<Value> {
         }),
         json!({
             "name": "scout",
-            "description": "SSH/local host inspection for synapse2 (B14). Supports: nodes (list hosts), peek (file/dir view), find (glob search), ps (processes), df (disk usage), delta (file diff), exec (allowlisted command, destructive), emit (multi-host exec, destructive), beam (file transfer, destructive).",
+            "description": "SSH/local host inspection for synapse2 (B14+B15). Supports: nodes (list hosts), peek (file/dir view), find (glob search), ps (processes), df (disk usage), delta (file diff), exec (allowlisted command, destructive), emit (multi-host exec, destructive), beam (file transfer, destructive), zfs (pools/datasets/snapshots, read-only), logs (syslog/journal/dmesg/auth, read-only).",
             "inputSchema": {
                 "type": "object",
                 "properties": {
                     "action": {
                         "type": "string",
-                        "enum": ["help", "nodes", "peek", "find", "ps", "df", "delta", "exec", "emit", "beam"]
+                        "enum": ["help", "nodes", "peek", "find", "ps", "df", "delta", "exec", "emit", "beam", "zfs", "logs"]
+                    },
+                    "subaction": {
+                        "type": "string",
+                        "description": "For action=zfs: pools|datasets|snapshots. For action=logs: syslog|journal|dmesg|auth."
                     },
                     // shared
                     "host": { "type": "string", "description": "Target host name (required for most actions)." },
@@ -90,10 +94,10 @@ fn build_tool_definitions() -> Vec<Value> {
                     "depth": { "type": "integer", "minimum": 1, "maximum": 20, "description": "peek/find: tree depth (default 3 for peek, 10 for find)." },
                     // find
                     "pattern": { "type": "string", "description": "find: glob pattern for -name (must not start with -)." },
-                    "limit": { "type": "integer", "minimum": 1, "description": "find/ps: max results (default 500 for find, 50 for ps)." },
+                    "limit": { "type": "integer", "minimum": 1, "description": "find/ps/zfs snapshots: max results (default 500 for find, 50 for ps, unlimited for snapshots)." },
                     // ps
                     "sort": { "type": "string", "enum": ["cpu", "mem", "pid", "time"], "description": "ps: sort field (default cpu)." },
-                    "grep": { "type": "string", "description": "ps: substring filter on process lines." },
+                    "grep": { "type": "string", "description": "ps: substring filter on process lines. logs: filter applied locally after retrieval (injection-safe)." },
                     "user": { "type": "string", "description": "ps: prefix-match filter on user column." },
                     // delta
                     "source_host": { "type": "string", "description": "delta: source host name." },
@@ -119,10 +123,19 @@ fn build_tool_definitions() -> Vec<Value> {
                         }
                     },
                     // beam
-                    "source_host": { "type": "string", "description": "beam: source host name." },
-                    "source_path": { "type": "string", "description": "beam: source absolute path." },
                     "dest_host": { "type": "string", "description": "beam: destination host name." },
-                    "dest_path": { "type": "string", "description": "beam: destination absolute path." }
+                    "dest_path": { "type": "string", "description": "beam: destination absolute path." },
+                    // zfs (B15)
+                    "pool": { "type": "string", "description": "zfs pools: exact pool name filter. zfs datasets: restrict to this pool (implies -r). zfs snapshots: restrict to this pool (if dataset not given)." },
+                    "dataset_type": { "type": "string", "enum": ["filesystem", "volume", "snapshot", "bookmark", "all"], "description": "zfs datasets: filter by dataset type (-t)." },
+                    "recursive": { "type": "boolean", "description": "zfs datasets: list recursively (-r). Default false." },
+                    "dataset": { "type": "string", "description": "zfs snapshots: restrict snapshots to this dataset (takes priority over pool)." },
+                    // logs (B15)
+                    "lines": { "type": "integer", "minimum": 1, "maximum": 500, "description": "logs: number of lines to retrieve (default 100)." },
+                    "unit": { "type": "string", "description": "logs journal: systemd unit filter (-u)." },
+                    "priority": { "type": "string", "description": "logs journal: priority filter (-p). e.g. err, warning, info, debug." },
+                    "since": { "type": "string", "description": "logs journal: start time (--since). e.g. '2026-05-29 00:00:00' or '-1h'." },
+                    "until": { "type": "string", "description": "logs journal: end time (--until)." }
                 },
                 "required": ["action"],
                 "additionalProperties": false

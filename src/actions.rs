@@ -5,7 +5,7 @@ use serde_json::{json, Value};
 
 mod dispatch;
 mod flux;
-mod scout;
+pub(crate) mod scout;
 
 // ── Re-exports (keep crate::actions::X resolving for all callers) ─────────────
 
@@ -13,7 +13,7 @@ pub use dispatch::{execute_service_action, is_confirmation_denied, is_validation
 pub use flux::{ComposeArgs, ContainerArgs, DockerArgs, HostArgs};
 pub use scout::{
     ScoutBeamArgs, ScoutDeltaArgs, ScoutEmitArgs, ScoutEmitTarget, ScoutExecArgs, ScoutFindArgs,
-    ScoutPsArgs,
+    ScoutLogsArgs, ScoutPsArgs, ScoutZfsArgs,
 };
 
 // ── Validation error type ─────────────────────────────────────────────────────
@@ -176,6 +176,20 @@ pub const ACTION_SPECS: &[ActionSpec] = &[
         transport: ActionTransport::Any,
         destructive: true,
     },
+    // B15: ZFS read-only introspection (pools/datasets/snapshots).
+    ActionSpec {
+        name: "zfs",
+        required_scope: Some(READ_SCOPE),
+        transport: ActionTransport::Any,
+        destructive: false,
+    },
+    // B15: Log retrieval read-only (syslog/journal/dmesg/auth).
+    ActionSpec {
+        name: "logs",
+        required_scope: Some(READ_SCOPE),
+        transport: ActionTransport::Any,
+        destructive: false,
+    },
 ];
 
 /// Derive whether an action is read-only.
@@ -256,6 +270,10 @@ pub enum SynapseAction {
     ScoutExec(Box<ScoutExecArgs>),
     ScoutEmit(Box<ScoutEmitArgs>),
     ScoutBeam(Box<ScoutBeamArgs>),
+    /// B15: ZFS subactions (pools/datasets/snapshots).
+    ScoutZfs(Box<ScoutZfsArgs>),
+    /// B15: Log subactions (syslog/journal/dmesg/auth).
+    ScoutLogs(Box<ScoutLogsArgs>),
 }
 
 impl SynapseAction {
@@ -275,6 +293,8 @@ impl SynapseAction {
             Self::ScoutExec(_) => "exec",
             Self::ScoutEmit(_) => "emit",
             Self::ScoutBeam(_) => "beam",
+            Self::ScoutZfs(_) => "zfs",
+            Self::ScoutLogs(_) => "logs",
         }
     }
 }

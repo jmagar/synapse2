@@ -16,7 +16,7 @@
 use crate::{
     actions::{
         rest_help, ContainerArgs, DockerArgs, ScoutBeamArgs, ScoutDeltaArgs, ScoutEmitArgs,
-        ScoutExecArgs, ScoutFindArgs, ScoutPsArgs,
+        ScoutExecArgs, ScoutFindArgs, ScoutLogsArgs, ScoutPsArgs, ScoutZfsArgs,
     },
     app::SynapseService,
     config::SynapseConfig,
@@ -79,6 +79,13 @@ pub const USAGE: &str = "Usage:
   synapse2 scout exec --host HOST --command CMD [--path PATH] [--args A1 A2...]
   synapse2 scout emit --command CMD --target HOST:PATH[,HOST:PATH...] [--timeout S]
   synapse2 scout beam --source-host H --source-path P --dest-host H --dest-path P
+  synapse2 scout zfs pools --host HOST [--pool POOL]
+  synapse2 scout zfs datasets --host HOST [--pool POOL] [--type filesystem|volume|snapshot|bookmark|all] [--recursive]
+  synapse2 scout zfs snapshots --host HOST [--pool POOL] [--dataset DS] [--limit N]
+  synapse2 scout logs syslog --host HOST [--lines N] [--grep STR]
+  synapse2 scout logs journal --host HOST [--lines N] [--unit UNIT] [--priority PRIO] [--since T] [--until T] [--grep STR]
+  synapse2 scout logs dmesg --host HOST [--lines N] [--grep STR]
+  synapse2 scout logs auth --host HOST [--lines N] [--grep STR]
   synapse2 help                      Show JSON action reference
   synapse2 doctor [--json]           Run environment pre-flight checks
   synapse2 watch [--url URL] [--interval N]  Poll /health and emit on state change
@@ -129,6 +136,10 @@ pub enum Command {
     ScoutExec(Box<ScoutExecArgs>),
     ScoutEmit(Box<ScoutEmitArgs>),
     ScoutBeam(Box<ScoutBeamArgs>),
+    /// B15: ZFS subactions via CLI.
+    ScoutZfs(Box<ScoutZfsArgs>),
+    /// B15: Log subactions via CLI.
+    ScoutLogs(Box<ScoutLogsArgs>),
     Help,
     /// Pre-flight environment validation (§48).
     ///
@@ -253,7 +264,9 @@ pub async fn run(cmd: Command, cfg: &SynapseConfig) -> Result<()> {
         | Command::ScoutDelta(_)
         | Command::ScoutExec(_)
         | Command::ScoutEmit(_)
-        | Command::ScoutBeam(_) => scout::run_scout(&cmd, &service, &confirmer).await?,
+        | Command::ScoutBeam(_)
+        | Command::ScoutZfs(_)
+        | Command::ScoutLogs(_) => scout::run_scout(&cmd, &service, &confirmer).await?,
         Command::Help => rest_help(),
         // Doctor, Watch, and Setup are never dispatched via this function — main.rs
         // handles them directly because they need config.mcp fields.

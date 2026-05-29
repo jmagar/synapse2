@@ -13,6 +13,8 @@
 //! | `fs`      | `peek`, `find`, `delta` — filesystem read operations |
 //! | `proc`    | `ps`, `df` — process / disk inspection |
 //! | `exec`    | `exec`, `emit`, `beam` — destructive execution / transfer |
+//! | `zfs`     | `pools`, `datasets`, `snapshots` — ZFS introspection (B15) |
+//! | `logs`    | `syslog`, `journal`, `dmesg`, `auth` — log retrieval (B15) |
 
 use anyhow::Result;
 use serde_json::{json, Value};
@@ -25,7 +27,9 @@ use crate::ssh::{SshExecutor, SshPool};
 
 pub mod exec;
 pub mod fs;
+pub mod logs;
 pub mod proc;
+pub mod zfs;
 
 #[cfg(test)]
 #[path = "scout_service_tests.rs"]
@@ -61,9 +65,10 @@ impl ScoutService {
     pub async fn help(&self) -> Result<Value> {
         Ok(json!({
             "tool": "scout",
-            "actions": ["nodes", "peek", "find", "ps", "df", "delta", "exec", "emit", "beam", "help"],
+            "actions": ["nodes", "peek", "find", "ps", "df", "delta", "exec", "emit", "beam", "zfs", "logs", "help"],
             "destructive": ["exec", "emit", "beam"],
-            "deferred": ["zfs", "logs"],
+            "zfs_subactions": ["pools", "datasets", "snapshots"],
+            "logs_subactions": ["syslog", "journal", "dmesg", "auth"],
         }))
     }
 
@@ -219,5 +224,101 @@ impl ScoutService {
         let source_host = scout::resolve_host(self.host_repo.as_ref(), source_host_name)?;
         let dest_host = scout::resolve_host(self.host_repo.as_ref(), dest_host_name)?;
         exec::beam(&source_host, source_path, &dest_host, dest_path, confirmer).await
+    }
+
+    // ── zfs.pools ────────────────────────────────────────────────────────────
+
+    pub async fn zfs_pools(&self, host_name: &str, pool: Option<&str>) -> Result<Value> {
+        let host = scout::resolve_host(self.host_repo.as_ref(), host_name)?;
+        zfs::pools(&host, self.ssh_pool.as_ref(), pool).await
+    }
+
+    // ── zfs.datasets ─────────────────────────────────────────────────────────
+
+    pub async fn zfs_datasets(
+        &self,
+        host_name: &str,
+        pool: Option<&str>,
+        dataset_type: Option<&str>,
+        recursive: bool,
+    ) -> Result<Value> {
+        let host = scout::resolve_host(self.host_repo.as_ref(), host_name)?;
+        zfs::datasets(&host, self.ssh_pool.as_ref(), pool, dataset_type, recursive).await
+    }
+
+    // ── zfs.snapshots ─────────────────────────────────────────────────────────
+
+    pub async fn zfs_snapshots(
+        &self,
+        host_name: &str,
+        pool: Option<&str>,
+        dataset: Option<&str>,
+        limit: Option<u32>,
+    ) -> Result<Value> {
+        let host = scout::resolve_host(self.host_repo.as_ref(), host_name)?;
+        zfs::snapshots(&host, self.ssh_pool.as_ref(), pool, dataset, limit).await
+    }
+
+    // ── logs.syslog ───────────────────────────────────────────────────────────
+
+    pub async fn logs_syslog(
+        &self,
+        host_name: &str,
+        lines: u32,
+        grep: Option<&str>,
+    ) -> Result<Value> {
+        let host = scout::resolve_host(self.host_repo.as_ref(), host_name)?;
+        logs::syslog(&host, self.ssh_pool.as_ref(), lines, grep).await
+    }
+
+    // ── logs.journal ──────────────────────────────────────────────────────────
+
+    #[allow(clippy::too_many_arguments)]
+    pub async fn logs_journal(
+        &self,
+        host_name: &str,
+        lines: u32,
+        unit: Option<&str>,
+        priority: Option<&str>,
+        since: Option<&str>,
+        until: Option<&str>,
+        grep: Option<&str>,
+    ) -> Result<Value> {
+        let host = scout::resolve_host(self.host_repo.as_ref(), host_name)?;
+        logs::journal(
+            &host,
+            self.ssh_pool.as_ref(),
+            lines,
+            unit,
+            priority,
+            since,
+            until,
+            grep,
+        )
+        .await
+    }
+
+    // ── logs.dmesg ────────────────────────────────────────────────────────────
+
+    pub async fn logs_dmesg(
+        &self,
+        host_name: &str,
+        lines: u32,
+        grep: Option<&str>,
+    ) -> Result<Value> {
+        let host = scout::resolve_host(self.host_repo.as_ref(), host_name)?;
+        logs::dmesg(&host, self.ssh_pool.as_ref(), lines, grep).await
+    }
+
+    // ── logs.auth ────────────────────────────────────────────────────────────
+
+    pub async fn logs_auth(
+        &self,
+        host_name: &str,
+        lines: u32,
+        grep: Option<&str>,
+    ) -> Result<Value> {
+        let host = scout::resolve_host(self.host_repo.as_ref(), host_name)?;
+        logs::auth(&host, self.ssh_pool.as_ref(), lines, grep).await
     }
 }

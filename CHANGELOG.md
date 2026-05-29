@@ -26,6 +26,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `create_container` added to `ContainerOps` trait, `BollardClient` impl, and `MockDockerClient` (with `create_container_response` field for test scripting).
 - `optional_u64_param` helper added to `crate::actions` shared param helpers.
 
+- **scout ZFS + logs (B15)** — 7 new read-only scout subactions reachable from both MCP (`scout` tool `action=zfs|logs`) and CLI (`synapse2 scout zfs|logs …`):
+  - `zfs pools` — `zpool list [<pool>]` via SSH; returns tabular `{header, rows}`. Clean error when ZFS not installed.
+  - `zfs datasets` — `zfs list [-t <type>] [-r] [<pool>]`; type allowlist enforced (`filesystem|volume|snapshot|bookmark|all`).
+  - `zfs snapshots` — `zfs list -t snapshot [-r <dataset|pool>]`; optional `limit` truncates rows (with `truncated` flag).
+  - `logs syslog` — `tail -n <lines> /var/log/syslog`; falls back to `/var/log/messages` (RHEL/CentOS).
+  - `logs journal` — `journalctl -n <lines> --no-pager [-u unit] [-p priority] [--since] [--until]`; all filter args as typed argv (no shell injection).
+  - `logs dmesg` — `dmesg --color=never`; permission errors returned as structured help rather than hard-failing.
+  - `logs auth` — `tail -n <lines> /var/log/auth.log`; falls back to `/var/log/secure`.
+  - Grep filtering applied **locally** after remote retrieval (injection-safe) for all four log subactions.
+  - Lines clamped to `[1, 500]`, default 100.
+- `src/scout_service/zfs.rs` — `pools`, `datasets`, `snapshots` implementations + tabular parser.
+- `src/scout_service/logs.rs` — `syslog`, `journal`, `dmesg`, `auth` implementations + `apply_grep` helper.
+- `src/scout_service/zfs_tests.rs`, `logs_tests.rs` — unit tests: tabular parsing, limit truncation, fallback path (syslog→messages, auth.log→secure), dmesg permission error, grep filter, invalid type rejection, ZFS-not-installed error.
+- `ScoutZfsArgs`, `ScoutLogsArgs` arg structs added to `actions/scout.rs` with `from_scout_args` arms.
+- `SynapseAction::ScoutZfs`, `SynapseAction::ScoutLogs` variants added; dispatch via `dispatch_scout_zfs`/`dispatch_scout_logs` helpers.
+- `ACTION_SPECS` updated: `zfs` and `logs` (read-only, `READ_SCOPE`, `destructive: false`).
+- `src/mcp/schemas.rs` — `scout` tool action enum expanded to include `zfs` and `logs`; subaction, pool/dataset/type/limit and log filter params documented.
+- CLI: `synapse2 scout zfs pools|datasets|snapshots` and `synapse2 scout logs syslog|journal|dmesg|auth` fully wired.
+
 - **scout simple actions (B14)** — 9 scout subactions reachable from both MCP (`scout` tool) and CLI (`synapse2 scout …`):
   - `nodes` — list all configured hosts (previously MVP, now fully wired to `ScoutService`).
   - `peek` — read a file or directory listing on a host. Adds `tree` (bool) and `depth` (1–10) params. Symlink check via `validate_safe_path` + remote via SSH `stat`+`cat`/`ls`.
