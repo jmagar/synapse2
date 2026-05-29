@@ -11,13 +11,16 @@ use async_trait::async_trait;
 use bollard::container::LogOutput;
 use bollard::exec::{CreateExecResults, StartExecOptions, StartExecResults};
 use bollard::models::{
-    ContainerInspectResponse, ContainerStatsResponse, ContainerSummary, ContainerTopResponse,
-    ExecConfig, ExecInspectResponse, ImageSummary, Network, SystemDataUsageResponse, SystemInfo,
-    VolumeListResponse,
+    BuildPruneResponse, ContainerInspectResponse, ContainerPruneResponse, ContainerStatsResponse,
+    ContainerSummary, ContainerTopResponse, CreateImageInfo, ExecConfig, ExecInspectResponse,
+    ImageDeleteResponseItem, ImagePruneResponse, ImageSummary, Network, NetworkPruneResponse,
+    SystemDataUsageResponse, SystemInfo, VolumeListResponse, VolumePruneResponse,
 };
 use bollard::query_parameters::{
-    DataUsageOptions, InspectContainerOptions, ListContainersOptions, ListImagesOptions,
-    ListNetworksOptions, ListVolumesOptions, LogsOptions, StatsOptions, TopOptions,
+    CreateImageOptions, DataUsageOptions, InspectContainerOptions, ListContainersOptions,
+    ListImagesOptions, ListNetworksOptions, ListVolumesOptions, LogsOptions, PruneBuildOptions,
+    PruneContainersOptions, PruneImagesOptions, PruneNetworksOptions, PruneVolumesOptions,
+    RemoveImageOptions, StatsOptions, TopOptions,
 };
 use futures_util::Stream;
 
@@ -92,6 +95,12 @@ pub trait ContainerOps: Send + Sync {
         &self,
         exec_id: &str,
     ) -> Result<ExecInspectResponse, bollard::errors::Error>;
+
+    /// Prune stopped containers (B10 `docker prune` target `containers`).
+    async fn prune_containers(
+        &self,
+        options: Option<PruneContainersOptions>,
+    ) -> Result<ContainerPruneResponse, bollard::errors::Error>;
 }
 
 /// Lifecycle verbs for [`ContainerOps::container_action`].
@@ -113,6 +122,23 @@ pub trait ImageOps: Send + Sync {
         &self,
         options: Option<ListImagesOptions>,
     ) -> Result<Vec<ImageSummary>, bollard::errors::Error>;
+
+    /// Pull an image (`docker pull`). Drives bollard's `create_image` stream to
+    /// completion and returns the collected progress frames (B10 `pull`).
+    fn pull_image(&self, options: Option<CreateImageOptions>) -> BoxStream<CreateImageInfo>;
+
+    /// Remove an image by name/id (B10 destructive `rmi`).
+    async fn remove_image(
+        &self,
+        image_name: &str,
+        options: Option<RemoveImageOptions>,
+    ) -> Result<Vec<ImageDeleteResponseItem>, bollard::errors::Error>;
+
+    /// Prune unused images (B10 destructive `prune` target `images`).
+    async fn prune_images(
+        &self,
+        options: Option<PruneImagesOptions>,
+    ) -> Result<ImagePruneResponse, bollard::errors::Error>;
 }
 
 /// Network resource operations.
@@ -122,6 +148,12 @@ pub trait NetworkOps: Send + Sync {
         &self,
         options: Option<ListNetworksOptions>,
     ) -> Result<Vec<Network>, bollard::errors::Error>;
+
+    /// Prune unused networks (B10 destructive `prune` target `networks`).
+    async fn prune_networks(
+        &self,
+        options: Option<PruneNetworksOptions>,
+    ) -> Result<NetworkPruneResponse, bollard::errors::Error>;
 }
 
 /// Volume resource operations.
@@ -131,6 +163,12 @@ pub trait VolumeOps: Send + Sync {
         &self,
         options: Option<ListVolumesOptions>,
     ) -> Result<VolumeListResponse, bollard::errors::Error>;
+
+    /// Prune unused volumes (B10 destructive `prune` target `volumes`).
+    async fn prune_volumes(
+        &self,
+        options: Option<PruneVolumesOptions>,
+    ) -> Result<VolumePruneResponse, bollard::errors::Error>;
 }
 
 /// System-level information and health.
@@ -146,6 +184,12 @@ pub trait SystemOps: Send + Sync {
     /// Liveness probe. Used by [`DockerClientCache`](crate::docker_client::DockerClientCache)
     /// for explicit health checks and by B8/B9 to detect a dead tunnel.
     async fn ping(&self) -> Result<String, bollard::errors::Error>;
+
+    /// Prune the build cache (B10 destructive `prune` target `buildcache`).
+    async fn prune_build(
+        &self,
+        options: Option<PruneBuildOptions>,
+    ) -> Result<BuildPruneResponse, bollard::errors::Error>;
 }
 
 /// The composed Docker client surface that action beads (B8–B13) depend on.

@@ -14,7 +14,7 @@
 //! ```
 
 use crate::{
-    actions::{rest_help, ContainerArgs},
+    actions::{rest_help, ContainerArgs, DockerArgs},
     app::SynapseService,
     config::SynapseConfig,
     synapse2::SynapseClient,
@@ -33,7 +33,12 @@ pub const USAGE: &str = "Usage:
   synapse2 [serve]          Start MCP HTTP server (default)
   synapse2 mcp              Start MCP stdio transport
 
-  synapse2 flux docker info|images|networks|volumes
+  synapse2 flux docker info|df|networks|volumes [--host H]
+  synapse2 flux docker images [--host H] [--dangling-only]
+  synapse2 flux docker pull --host H --image IMG
+  synapse2 flux docker build --host H --context /abs/path --tag TAG [--dockerfile REL] [--no-cache]
+  synapse2 flux docker rmi --host H --image IMG --force
+  synapse2 flux docker prune --host H --target containers|images|volumes|networks|buildcache|all --force
   synapse2 flux container list [--host H] [--state S] [--name-filter N] [--image-filter I] [--label-filter K=V]
   synapse2 flux container inspect --container-id ID [--host H] [--summary]
   synapse2 flux container logs --container-id ID [--host H] [--lines N] [--since T] [--until T] [--grep S] [--stream stdout|stderr|both]
@@ -70,9 +75,9 @@ pub fn usage() -> &'static str {
 
 #[derive(Debug, PartialEq, Eq)]
 pub enum Command {
-    FluxDocker {
-        subaction: String,
-    },
+    /// Docker subactions. Params boxed in [`DockerArgs`] (shared with
+    /// [`crate::actions::SynapseAction`]) so the enum stays small.
+    FluxDocker(Box<DockerArgs>),
     /// Container read-only subactions. Params are boxed in [`ContainerArgs`]
     /// (shared with [`crate::actions::SynapseAction`]) so the enum stays small.
     FluxContainer(Box<ContainerArgs>),
@@ -196,14 +201,89 @@ pub async fn run(cmd: Command, cfg: &SynapseConfig) -> Result<()> {
     let client = SynapseClient::new(cfg)?;
     let service = SynapseService::new(client);
 
+    // The CLI is human-driven: the operator running the command IS the
+    // confirmation gate. `CliStderrWarn` prints a single warning line for
+    // destructive ops and proceeds (B5 design).
+    let confirmer = crate::elicitation_gate::CliStderrWarn;
+
     let result = match &cmd {
-        Command::FluxDocker { subaction } => match subaction.as_str() {
-            "info" => service.flux().docker_info().await?,
-            "images" => service.flux().docker_images().await?,
-            "networks" => service.flux().docker_networks().await?,
-            "volumes" => service.flux().docker_volumes().await?,
-            other => return Err(anyhow!("unknown flux docker subaction `{other}`")),
-        },
+        Command::FluxDocker(args) => {
+            let DockerArgs {
+                subaction,
+                host,
+                dangling_only,
+                image,
+                force,
+                context,
+                tag,
+                dockerfile,
+                no_cache,
+                prune_target,
+            } = args.as_ref();
+            let flux = service.flux();
+            let host_opt = host.as_deref();
+            match subaction.as_str() {
+                "info" => flux.docker_info(host_opt).await?,
+                "df" => flux.docker_df(host_opt).await?,
+                "images" => {
+                    flux.docker_images(host_opt, dangling_only.unwrap_or(false))
+                        .await?
+                }
+                "networks" => flux.docker_networks(host_opt).await?,
+                "volumes" => flux.docker_volumes(host_opt).await?,
+                "pull" => {
+                    let h = host
+                        .as_deref()
+                        .ok_or_else(|| anyhow!("docker pull requires --host"))?;
+                    let img = image
+                        .as_deref()
+                        .ok_or_else(|| anyhow!("docker pull requires --image"))?;
+                    flux.docker_pull(h, img).await?
+                }
+                "build" => {
+                    use crate::flux_service::docker::build_args;
+                    let h = host
+                        .as_deref()
+                        .ok_or_else(|| anyhow!("docker build requires --host"))?;
+                    let ctx = context
+                        .as_deref()
+                        .ok_or_else(|| anyhow!("docker build requires --context"))?;
+                    let t = tag
+                        .as_deref()
+                        .ok_or_else(|| anyhow!("docker build requires --tag"))?;
+                    let built =
+                        build_args(ctx, t, dockerfile.as_deref(), no_cache.unwrap_or(false))?;
+                    flux.docker_build(h, built, &confirmer).await?
+                }
+                "rmi" => {
+                    let h = host
+                        .as_deref()
+                        .ok_or_else(|| anyhow!("docker rmi requires --host"))?;
+                    let img = image
+                        .as_deref()
+                        .ok_or_else(|| anyhow!("docker rmi requires --image"))?;
+                    if !force.unwrap_or(false) {
+                        return Err(anyhow!("docker rmi requires --force"));
+                    }
+                    flux.docker_rmi(h, img, true, &confirmer).await?
+                }
+                "prune" => {
+                    use crate::flux_service::docker::PruneTarget;
+                    let h = host
+                        .as_deref()
+                        .ok_or_else(|| anyhow!("docker prune requires --host"))?;
+                    let target_str = prune_target
+                        .as_deref()
+                        .ok_or_else(|| anyhow!("docker prune requires --target"))?;
+                    let target = PruneTarget::parse(target_str)?;
+                    if !force.unwrap_or(false) {
+                        return Err(anyhow!("docker prune requires --force"));
+                    }
+                    flux.docker_prune(h, target, &confirmer).await?
+                }
+                other => return Err(anyhow!("unknown flux docker subaction `{other}`")),
+            }
+        }
         Command::FluxContainer(args) => {
             use crate::flux_service::container_read::{ListFilters, LogOptions, DEFAULT_LOG_LINES};
             let ContainerArgs {
@@ -305,9 +385,31 @@ fn reject_args(args: &[String], command: &str) -> Result<()> {
 
 fn parse_flux(args: &[String]) -> Result<Command> {
     match args {
-        [group, subaction] if group == "docker" => Ok(Command::FluxDocker {
-            subaction: subaction.clone(),
-        }),
+        [group, subaction, rest @ ..] if group == "docker" => {
+            // Split out valueless bool flags before the value-pair parser.
+            const BOOL_FLAGS: &[&str] = &["--dangling-only", "--no-cache", "--force"];
+            let has_bool = |flag: &str| rest.iter().any(|a| a == flag);
+            let dangling_only = has_bool("--dangling-only");
+            let no_cache = has_bool("--no-cache");
+            let force = has_bool("--force");
+            let value_args: Vec<String> = rest
+                .iter()
+                .filter(|a| !BOOL_FLAGS.contains(&a.as_str()))
+                .cloned()
+                .collect();
+            Ok(Command::FluxDocker(Box::new(DockerArgs {
+                subaction: subaction.clone(),
+                host: parse_optional_named_value(&value_args, "--host")?,
+                dangling_only: dangling_only.then_some(true),
+                image: parse_optional_named_value(&value_args, "--image")?,
+                force: force.then_some(true),
+                context: parse_optional_named_value(&value_args, "--context")?,
+                tag: parse_optional_named_value(&value_args, "--tag")?,
+                dockerfile: parse_optional_named_value(&value_args, "--dockerfile")?,
+                no_cache: no_cache.then_some(true),
+                prune_target: parse_optional_named_value(&value_args, "--target")?,
+            })))
+        }
         [group, subaction, rest @ ..] if group == "container" => {
             // `--summary` is a valueless bool flag; split it out before the
             // value-pair parser (which requires a value after every flag).

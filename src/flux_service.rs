@@ -13,16 +13,18 @@ use serde_json::{json, Map, Value};
 use std::sync::Arc;
 
 use crate::compose::{ComposeDiscovery, ComposeProject};
-use crate::docker;
 use crate::docker_client::DockerClientCache;
+use crate::elicitation_gate::Confirmer;
 use crate::fanout::{fanout, FanoutOutcome};
 use crate::host_config::HostRepository;
 use crate::scout;
 use crate::synapse::HostConfig;
 
 pub mod container_read;
+pub mod docker;
 
 use container_read::{ListFilters, LogOptions};
+use docker::{BuildArgs, PruneTarget};
 
 #[cfg(test)]
 #[path = "flux_service_tests.rs"]
@@ -56,29 +58,164 @@ impl FluxService {
         Ok(json!({
             "tool": "flux",
             "actions": {
-                "docker": ["info", "images", "networks", "volumes"],
+                "docker": [
+                    "info", "df", "images", "networks", "volumes",
+                    "pull", "build", "rmi", "prune"
+                ],
                 "container": ["list", "inspect", "logs", "stats", "top", "search"],
                 "host": ["status"],
                 "help": []
             },
-            "deferred": ["compose", "destructive container lifecycle", "docker prune/rmi"],
+            "destructive": ["docker build", "docker rmi", "docker prune"],
+            "deferred": ["compose", "destructive container lifecycle"],
         }))
     }
 
-    pub async fn docker_info(&self) -> Result<Value> {
-        docker::docker_json(&["info", "--format", "{{json .}}"]).await
+    // ── docker read-only ops (B10) ───────────────────────────────────────
+    //
+    // These fan out across target host(s) when `host` is unset, mirroring the
+    // container read-only pattern. The per-host logic lives in the pure `docker`
+    // submodule for unit-testability with a `MockDockerClient`.
+
+    /// System info across target host(s), fanning out when `host` is unset.
+    pub async fn docker_info(&self, host: Option<&str>) -> Result<Value> {
+        let hosts = self.target_hosts(host)?;
+        let clients = &self.docker_clients;
+        let outcome = fanout(&hosts, |h| async move {
+            let client = clients.client_for(&h).await.map_err(|e| e.to_string())?;
+            docker::info_on_host(client.as_ref(), &h.name)
+                .await
+                .map_err(|e| e.to_string())
+        })
+        .await;
+        Ok(flatten_scalar_outcome(outcome, "info"))
     }
 
-    pub async fn docker_images(&self) -> Result<Value> {
-        docker::docker_json(&["images", "--format", "{{json .}}"]).await
+    /// Disk usage (`docker system df`) across target host(s).
+    pub async fn docker_df(&self, host: Option<&str>) -> Result<Value> {
+        let hosts = self.target_hosts(host)?;
+        let clients = &self.docker_clients;
+        let outcome = fanout(&hosts, |h| async move {
+            let client = clients.client_for(&h).await.map_err(|e| e.to_string())?;
+            docker::df_on_host(client.as_ref(), &h.name)
+                .await
+                .map_err(|e| e.to_string())
+        })
+        .await;
+        Ok(flatten_scalar_outcome(outcome, "df"))
     }
 
-    pub async fn docker_networks(&self) -> Result<Value> {
-        docker::docker_json(&["network", "ls", "--format", "{{json .}}"]).await
+    /// List images across target host(s); `dangling_only` adds a server filter.
+    pub async fn docker_images(&self, host: Option<&str>, dangling_only: bool) -> Result<Value> {
+        let hosts = self.target_hosts(host)?;
+        let clients = &self.docker_clients;
+        let outcome = fanout(&hosts, |h| async move {
+            let client = clients.client_for(&h).await.map_err(|e| e.to_string())?;
+            docker::images_on_host(client.as_ref(), &h.name, dangling_only)
+                .await
+                .map_err(|e| e.to_string())
+        })
+        .await;
+        Ok(flatten_list_outcome(outcome, "images"))
     }
 
-    pub async fn docker_volumes(&self) -> Result<Value> {
-        docker::docker_json(&["volume", "ls", "--format", "{{json .}}"]).await
+    /// List networks across target host(s).
+    pub async fn docker_networks(&self, host: Option<&str>) -> Result<Value> {
+        let hosts = self.target_hosts(host)?;
+        let clients = &self.docker_clients;
+        let outcome = fanout(&hosts, |h| async move {
+            let client = clients.client_for(&h).await.map_err(|e| e.to_string())?;
+            docker::networks_on_host(client.as_ref(), &h.name)
+                .await
+                .map_err(|e| e.to_string())
+        })
+        .await;
+        Ok(flatten_list_outcome(outcome, "networks"))
+    }
+
+    /// List volumes across target host(s).
+    pub async fn docker_volumes(&self, host: Option<&str>) -> Result<Value> {
+        let hosts = self.target_hosts(host)?;
+        let clients = &self.docker_clients;
+        let outcome = fanout(&hosts, |h| async move {
+            let client = clients.client_for(&h).await.map_err(|e| e.to_string())?;
+            docker::volumes_on_host(client.as_ref(), &h.name)
+                .await
+                .map_err(|e| e.to_string())
+        })
+        .await;
+        Ok(flatten_list_outcome(outcome, "volumes"))
+    }
+
+    // ── docker mutating ops (B10) ────────────────────────────────────────
+    //
+    // Single-host only (host required). `pull` mutates but is non-gated by
+    // convention (parity with synapse-mcp). `build`, `rmi`, `prune` are
+    // destructive and pass through the B5 confirmation gate BEFORE any IO.
+
+    /// Pull an image on a single host. Non-gated (writes an image but is the
+    /// standard provisioning path).
+    pub async fn docker_pull(&self, host: &str, image: &str) -> Result<Value> {
+        let h = scout::resolve_host(self.host_repo.as_ref(), host)?;
+        let client = self.docker_clients.client_for(&h).await?;
+        docker::pull_on_host(client.as_ref(), &h.name, image)
+            .await
+            .map_err(Into::into)
+    }
+
+    /// Build an image from a context on a single host (subprocess; locked bead
+    /// decision). DESTRUCTIVE-adjacent: gated before the subprocess runs.
+    pub async fn docker_build(
+        &self,
+        host: &str,
+        args: BuildArgs,
+        confirmer: &dyn Confirmer,
+    ) -> Result<Value> {
+        // Resolve host first so an unknown host is a validation error, not a gate.
+        let h = scout::resolve_host(self.host_repo.as_ref(), host)?;
+        confirmer
+            .require(
+                "docker build",
+                &format!("build image {} on {}", args.tag, h.name),
+            )
+            .await?;
+        docker::build_subprocess(&h.name, &args).await
+    }
+
+    /// Remove an image on a single host. DESTRUCTIVE: gated before IO.
+    pub async fn docker_rmi(
+        &self,
+        host: &str,
+        image: &str,
+        force: bool,
+        confirmer: &dyn Confirmer,
+    ) -> Result<Value> {
+        let h = scout::resolve_host(self.host_repo.as_ref(), host)?;
+        confirmer
+            .require("docker rmi", &format!("remove image {image} on {}", h.name))
+            .await?;
+        let client = self.docker_clients.client_for(&h).await?;
+        docker::rmi_on_host(client.as_ref(), &h.name, image, force)
+            .await
+            .map_err(Into::into)
+    }
+
+    /// Prune docker resources on a single host. DESTRUCTIVE: gated before IO.
+    /// The confirmation details spell out the scope (security review).
+    pub async fn docker_prune(
+        &self,
+        host: &str,
+        target: PruneTarget,
+        confirmer: &dyn Confirmer,
+    ) -> Result<Value> {
+        let h = scout::resolve_host(self.host_repo.as_ref(), host)?;
+        confirmer
+            .require("docker prune", target.confirmation_details())
+            .await?;
+        let client = self.docker_clients.client_for(&h).await?;
+        docker::prune_on_host(client.as_ref(), &h.name, target)
+            .await
+            .map_err(Into::into)
     }
 
     // ── container read-only ops (B8) ─────────────────────────────────────
@@ -272,7 +409,7 @@ impl FluxService {
     pub async fn host_status(&self, host: Option<&str>) -> Result<Value> {
         Ok(json!({
             "host": host.unwrap_or("local"),
-            "docker": self.docker_info().await?,
+            "docker": self.docker_info(host).await?,
         }))
     }
 
@@ -309,6 +446,31 @@ fn flatten_list_outcome(outcome: FanoutOutcome<Vec<Value>, String>, key: &str) -
     let mut obj = Map::new();
     obj.insert("count".into(), json!(items.len()));
     obj.insert(key.into(), json!(items));
+    obj.insert("partial".into(), json!(outcome.is_partial()));
+    if !errors.is_empty() {
+        obj.insert("errors".into(), Value::Object(errors));
+    }
+    Value::Object(obj)
+}
+
+/// Flatten a fanout outcome whose per-host value is a single `Value` (e.g.
+/// `info`, `df`) into a host-keyed map under `key`, with a `partial` flag and a
+/// per-host `errors` map. Each per-host value already carries its `host` tag.
+fn flatten_scalar_outcome(outcome: FanoutOutcome<Value, String>, key: &str) -> Value {
+    let results: Vec<Value> = outcome
+        .ok_results()
+        .iter()
+        .map(|(_host, v)| v.clone())
+        .collect();
+    let errors: Map<String, Value> = outcome
+        .err_results()
+        .iter()
+        .map(|(host, err)| (host.clone(), json!(err)))
+        .collect();
+
+    let mut obj = Map::new();
+    obj.insert("count".into(), json!(results.len()));
+    obj.insert(key.into(), json!(results));
     obj.insert("partial".into(), json!(outcome.is_partial()));
     if !errors.is_empty() {
         obj.insert("errors".into(), Value::Object(errors));

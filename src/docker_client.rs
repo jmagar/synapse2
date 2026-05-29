@@ -60,7 +60,7 @@ pub use traits::{
 };
 
 #[cfg(any(test, feature = "test-support"))]
-pub use mock::MockDockerClient;
+pub use mock::{MockDockerClient, MutatingOp};
 
 // ---------------------------------------------------------------------------
 // Shared constants and helpers that sub-modules depend on.

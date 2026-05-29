@@ -2,12 +2,11 @@ use synapse2::cli::{parse_args_from, Command, SetupCommand};
 
 #[test]
 fn flux_docker_info_parsed() {
-    assert_eq!(
-        parse_args_from(["flux", "docker", "info"]).unwrap(),
-        Some(Command::FluxDocker {
-            subaction: "info".into()
-        })
-    );
+    let cmd = parse_args_from(["flux", "docker", "info"]).unwrap();
+    match cmd {
+        Some(Command::FluxDocker(args)) => assert_eq!(args.subaction, "info"),
+        other => panic!("expected FluxDocker, got {other:?}"),
+    }
 }
 
 #[test]

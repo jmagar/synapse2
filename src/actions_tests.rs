@@ -45,12 +45,10 @@ fn read_scope_and_write_implies_read() {
 
 #[test]
 fn parses_flux_actions() {
-    assert_eq!(
-        SynapseAction::from_flux_args(&json!({"action":"docker","subaction":"info"})).unwrap(),
-        SynapseAction::FluxDocker {
-            subaction: "info".into()
-        }
-    );
+    match SynapseAction::from_flux_args(&json!({"action":"docker","subaction":"info"})).unwrap() {
+        SynapseAction::FluxDocker(args) => assert_eq!(args.subaction, "info"),
+        other => panic!("expected FluxDocker, got {other:?}"),
+    }
     let logs = SynapseAction::from_flux_args(&json!({
         "action":"container",
         "subaction":"logs",

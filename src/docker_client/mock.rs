@@ -8,13 +8,16 @@ use async_trait::async_trait;
 use bollard::container::LogOutput;
 use bollard::exec::{CreateExecResults, StartExecOptions, StartExecResults};
 use bollard::models::{
-    ContainerInspectResponse, ContainerStatsResponse, ContainerSummary, ContainerTopResponse,
-    ExecConfig, ExecInspectResponse, ImageSummary, Network, SystemDataUsageResponse, SystemInfo,
-    VolumeListResponse,
+    BuildPruneResponse, ContainerInspectResponse, ContainerPruneResponse, ContainerStatsResponse,
+    ContainerSummary, ContainerTopResponse, CreateImageInfo, ExecConfig, ExecInspectResponse,
+    ImageDeleteResponseItem, ImagePruneResponse, ImageSummary, Network, NetworkPruneResponse,
+    SystemDataUsageResponse, SystemInfo, VolumeListResponse, VolumePruneResponse,
 };
 use bollard::query_parameters::{
-    DataUsageOptions, InspectContainerOptions, ListContainersOptions, ListImagesOptions,
-    ListNetworksOptions, ListVolumesOptions, LogsOptions, StatsOptions, TopOptions,
+    CreateImageOptions, DataUsageOptions, InspectContainerOptions, ListContainersOptions,
+    ListImagesOptions, ListNetworksOptions, ListVolumesOptions, LogsOptions, PruneBuildOptions,
+    PruneContainersOptions, PruneImagesOptions, PruneNetworksOptions, PruneVolumesOptions,
+    RemoveImageOptions, StatsOptions, TopOptions,
 };
 
 use anyhow::Result;
@@ -22,6 +25,20 @@ use anyhow::Result;
 use super::traits::{
     BoxStream, ContainerAction, ContainerOps, ImageOps, NetworkOps, SystemOps, VolumeOps,
 };
+
+/// A destructive mutating op recorded by [`MockDockerClient`] for gate-assertion
+/// tests (B10). The `String` payload is the operative target (image name for
+/// `rmi`, prune target for `prune_*`, empty otherwise).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum MutatingOp {
+    PullImage,
+    RemoveImage(String),
+    PruneContainers,
+    PruneImages,
+    PruneNetworks,
+    PruneVolumes,
+    PruneBuild,
+}
 
 /// A scriptable in-memory [`DockerClient`](super::DockerClient) for tests. Each
 /// field holds the canned response for the corresponding operation; streaming/exec
@@ -50,6 +67,20 @@ pub struct MockDockerClient {
     pub logs_error: bool,
     /// Records every lifecycle action requested, for assertions.
     pub actions: std::sync::Mutex<Vec<(String, ContainerAction)>>,
+    /// Optional canned pull progress frames replayed by [`ImageOps::pull_image`].
+    pub pull_frames: Vec<CreateImageInfo>,
+    /// Canned `rmi` response (image delete items).
+    pub removed_images: Vec<ImageDeleteResponseItem>,
+    /// Canned prune responses, keyed by op.
+    pub image_prune: ImagePruneResponse,
+    pub container_prune: ContainerPruneResponse,
+    pub network_prune: NetworkPruneResponse,
+    pub volume_prune: VolumePruneResponse,
+    pub build_prune: BuildPruneResponse,
+    /// Records every destructive mutating op requested, for gate assertions
+    /// (B10). The gate-decline test asserts this stays empty; the
+    /// allow-destructive test asserts it is populated.
+    pub mutations: std::sync::Mutex<Vec<MutatingOp>>,
 }
 
 impl MockDockerClient {
@@ -60,6 +91,15 @@ impl MockDockerClient {
     /// Recorded `(name, action)` lifecycle calls.
     pub fn recorded_actions(&self) -> Vec<(String, ContainerAction)> {
         self.actions.lock().expect("mock action log").clone()
+    }
+
+    /// Recorded destructive mutating ops, for gate assertions (B10).
+    pub fn recorded_mutations(&self) -> Vec<MutatingOp> {
+        self.mutations.lock().expect("mock mutation log").clone()
+    }
+
+    fn record_mutation(&self, op: MutatingOp) {
+        self.mutations.lock().expect("mock mutation log").push(op);
     }
 }
 
@@ -147,6 +187,14 @@ impl ContainerOps for MockDockerClient {
     ) -> Result<ExecInspectResponse, bollard::errors::Error> {
         Ok(ExecInspectResponse::default())
     }
+
+    async fn prune_containers(
+        &self,
+        _options: Option<PruneContainersOptions>,
+    ) -> Result<ContainerPruneResponse, bollard::errors::Error> {
+        self.record_mutation(MutatingOp::PruneContainers);
+        Ok(self.container_prune.clone())
+    }
 }
 
 #[async_trait]
@@ -156,6 +204,30 @@ impl ImageOps for MockDockerClient {
         _options: Option<ListImagesOptions>,
     ) -> Result<Vec<ImageSummary>, bollard::errors::Error> {
         Ok(self.images.clone())
+    }
+
+    fn pull_image(&self, _options: Option<CreateImageOptions>) -> BoxStream<CreateImageInfo> {
+        self.record_mutation(MutatingOp::PullImage);
+        let frames: Vec<Result<CreateImageInfo, bollard::errors::Error>> =
+            self.pull_frames.iter().cloned().map(Ok).collect();
+        Box::pin(futures_util::stream::iter(frames))
+    }
+
+    async fn remove_image(
+        &self,
+        image_name: &str,
+        _options: Option<RemoveImageOptions>,
+    ) -> Result<Vec<ImageDeleteResponseItem>, bollard::errors::Error> {
+        self.record_mutation(MutatingOp::RemoveImage(image_name.to_owned()));
+        Ok(self.removed_images.clone())
+    }
+
+    async fn prune_images(
+        &self,
+        _options: Option<PruneImagesOptions>,
+    ) -> Result<ImagePruneResponse, bollard::errors::Error> {
+        self.record_mutation(MutatingOp::PruneImages);
+        Ok(self.image_prune.clone())
     }
 }
 
@@ -167,6 +239,14 @@ impl NetworkOps for MockDockerClient {
     ) -> Result<Vec<Network>, bollard::errors::Error> {
         Ok(self.networks.clone())
     }
+
+    async fn prune_networks(
+        &self,
+        _options: Option<PruneNetworksOptions>,
+    ) -> Result<NetworkPruneResponse, bollard::errors::Error> {
+        self.record_mutation(MutatingOp::PruneNetworks);
+        Ok(self.network_prune.clone())
+    }
 }
 
 #[async_trait]
@@ -176,6 +256,14 @@ impl VolumeOps for MockDockerClient {
         _options: Option<ListVolumesOptions>,
     ) -> Result<VolumeListResponse, bollard::errors::Error> {
         Ok(self.volumes.clone())
+    }
+
+    async fn prune_volumes(
+        &self,
+        _options: Option<PruneVolumesOptions>,
+    ) -> Result<VolumePruneResponse, bollard::errors::Error> {
+        self.record_mutation(MutatingOp::PruneVolumes);
+        Ok(self.volume_prune.clone())
     }
 }
 
@@ -194,5 +282,13 @@ impl SystemOps for MockDockerClient {
 
     async fn ping(&self) -> Result<String, bollard::errors::Error> {
         Ok(self.ping.clone())
+    }
+
+    async fn prune_build(
+        &self,
+        _options: Option<PruneBuildOptions>,
+    ) -> Result<BuildPruneResponse, bollard::errors::Error> {
+        self.record_mutation(MutatingOp::PruneBuild);
+        Ok(self.build_prune.clone())
     }
 }

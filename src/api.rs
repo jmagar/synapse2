@@ -47,7 +47,17 @@ pub async fn api_dispatch(
             ) {
                 return response;
             }
-            execute_service_action(&state.service, &action).await
+            // REST has no elicitation channel: destructive ops are hard-denied
+            // (DenyConfirm) unless the SYNAPSE_MCP_ALLOW_DESTRUCTIVE override is
+            // set, in which case NoConfirm runs them. Read-only ops are
+            // unaffected (their service methods never call the confirmer).
+            let confirmer: Box<dyn crate::elicitation_gate::Confirmer> =
+                if state.config.allow_destructive {
+                    Box::new(crate::elicitation_gate::NoConfirm)
+                } else {
+                    Box::new(crate::elicitation_gate::DenyConfirm)
+                };
+            execute_service_action(&state.service, &action, confirmer.as_ref()).await
         }
         Err(error) => Err(error),
     };
@@ -83,18 +93,26 @@ pub async fn api_dispatch(
 fn rest_action_from_request(action: &str, params: &Value) -> Result<SynapseAction> {
     match action {
         "help" => Ok(SynapseAction::FluxHelp),
-        "flux.docker.info" => Ok(SynapseAction::FluxDocker {
-            subaction: "info".into(),
-        }),
-        "flux.docker.images" => Ok(SynapseAction::FluxDocker {
-            subaction: "images".into(),
-        }),
-        "flux.docker.networks" => Ok(SynapseAction::FluxDocker {
-            subaction: "networks".into(),
-        }),
-        "flux.docker.volumes" => Ok(SynapseAction::FluxDocker {
-            subaction: "volumes".into(),
-        }),
+        // Docker subactions over REST. Merge caller params (host, dangling_only,
+        // image, etc.) into the flux arg shape so REST honors the same options
+        // as MCP/CLI. Destructive subactions (build/rmi/prune) are reachable
+        // but hard-denied without the allow-destructive override (no
+        // elicitation channel over REST — see api_dispatch).
+        "flux.docker.info"
+        | "flux.docker.df"
+        | "flux.docker.images"
+        | "flux.docker.networks"
+        | "flux.docker.volumes"
+        | "flux.docker.pull"
+        | "flux.docker.build"
+        | "flux.docker.rmi"
+        | "flux.docker.prune" => {
+            let subaction = action.trim_start_matches("flux.docker.");
+            let mut obj = params.as_object().cloned().unwrap_or_default();
+            obj.insert("action".into(), json!("docker"));
+            obj.insert("subaction".into(), json!(subaction));
+            SynapseAction::from_flux_args(&Value::Object(obj))
+        }
         "flux.container.list" => {
             // Merge caller params (may be null/absent) into the flux arg shape so
             // REST honors the same list filters as MCP/CLI.

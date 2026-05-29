@@ -10,13 +10,16 @@ use async_trait::async_trait;
 use bollard::container::LogOutput;
 use bollard::exec::{CreateExecResults, StartExecOptions, StartExecResults};
 use bollard::models::{
-    ContainerInspectResponse, ContainerStatsResponse, ContainerSummary, ContainerTopResponse,
-    ExecConfig, ExecInspectResponse, ImageSummary, Network, SystemDataUsageResponse, SystemInfo,
-    VolumeListResponse,
+    BuildPruneResponse, ContainerInspectResponse, ContainerPruneResponse, ContainerStatsResponse,
+    ContainerSummary, ContainerTopResponse, CreateImageInfo, ExecConfig, ExecInspectResponse,
+    ImageDeleteResponseItem, ImagePruneResponse, ImageSummary, Network, NetworkPruneResponse,
+    SystemDataUsageResponse, SystemInfo, VolumeListResponse, VolumePruneResponse,
 };
 use bollard::query_parameters::{
-    DataUsageOptions, InspectContainerOptions, ListContainersOptions, ListImagesOptions,
-    ListNetworksOptions, ListVolumesOptions, LogsOptions, StatsOptions, TopOptions,
+    CreateImageOptions, DataUsageOptions, InspectContainerOptions, ListContainersOptions,
+    ListImagesOptions, ListNetworksOptions, ListVolumesOptions, LogsOptions, PruneBuildOptions,
+    PruneContainersOptions, PruneImagesOptions, PruneNetworksOptions, PruneVolumesOptions,
+    RemoveImageOptions, StatsOptions, TopOptions,
 };
 use bollard::{Docker, API_DEFAULT_VERSION};
 
@@ -213,6 +216,13 @@ impl ContainerOps for BollardClient {
     ) -> Result<ExecInspectResponse, bollard::errors::Error> {
         self.docker.inspect_exec(exec_id).await
     }
+
+    async fn prune_containers(
+        &self,
+        options: Option<PruneContainersOptions>,
+    ) -> Result<ContainerPruneResponse, bollard::errors::Error> {
+        self.docker.prune_containers(options).await
+    }
 }
 
 #[async_trait]
@@ -222,6 +232,25 @@ impl ImageOps for BollardClient {
         options: Option<ListImagesOptions>,
     ) -> Result<Vec<ImageSummary>, bollard::errors::Error> {
         self.docker.list_images(options).await
+    }
+
+    fn pull_image(&self, options: Option<CreateImageOptions>) -> BoxStream<CreateImageInfo> {
+        Box::pin(self.docker.create_image(options, None, None))
+    }
+
+    async fn remove_image(
+        &self,
+        image_name: &str,
+        options: Option<RemoveImageOptions>,
+    ) -> Result<Vec<ImageDeleteResponseItem>, bollard::errors::Error> {
+        self.docker.remove_image(image_name, options, None).await
+    }
+
+    async fn prune_images(
+        &self,
+        options: Option<PruneImagesOptions>,
+    ) -> Result<ImagePruneResponse, bollard::errors::Error> {
+        self.docker.prune_images(options).await
     }
 }
 
@@ -233,6 +262,13 @@ impl NetworkOps for BollardClient {
     ) -> Result<Vec<Network>, bollard::errors::Error> {
         self.docker.list_networks(options).await
     }
+
+    async fn prune_networks(
+        &self,
+        options: Option<PruneNetworksOptions>,
+    ) -> Result<NetworkPruneResponse, bollard::errors::Error> {
+        self.docker.prune_networks(options).await
+    }
 }
 
 #[async_trait]
@@ -242,6 +278,13 @@ impl VolumeOps for BollardClient {
         options: Option<ListVolumesOptions>,
     ) -> Result<VolumeListResponse, bollard::errors::Error> {
         self.docker.list_volumes(options).await
+    }
+
+    async fn prune_volumes(
+        &self,
+        options: Option<PruneVolumesOptions>,
+    ) -> Result<VolumePruneResponse, bollard::errors::Error> {
+        self.docker.prune_volumes(options).await
     }
 }
 
@@ -260,5 +303,12 @@ impl SystemOps for BollardClient {
 
     async fn ping(&self) -> Result<String, bollard::errors::Error> {
         self.docker.ping().await
+    }
+
+    async fn prune_build(
+        &self,
+        options: Option<PruneBuildOptions>,
+    ) -> Result<BuildPruneResponse, bollard::errors::Error> {
+        self.docker.prune_build(options).await
     }
 }

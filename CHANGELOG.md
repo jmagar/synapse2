@@ -15,6 +15,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **flux docker full parity (B10)** — `info`, `df`, `images` (with `dangling_only`), `networks`, `volumes`, `pull`, `build`, `rmi`, `prune` (target: containers/images/volumes/networks/buildcache/all), via bollard, reachable from MCP (`flux` tool) and CLI. Read-only ops fan out across hosts; `pull`/`build`/`rmi`/`prune` are single-host. `build`/`rmi`/`prune` are gated through the B5 destructive-op elicitation gate (decline → hard error unless `SYNAPSE_MCP_ALLOW_DESTRUCTIVE=true`). `build` shells out to `docker build` (bollard's build needs a streamed tar); all other ops use bollard. New `src/flux_service/docker.rs` with build-context/Dockerfile validation and `PruneTarget` parsing.
+
 - **flux container read-only ops (B8)** — replaced the local-`docker`-CLI stubs for `list`/`inspect`/`logs` with bollard-backed implementations and added `stats`, `top`, and `search`, all reachable from both MCP (`flux` tool) and CLI (`synapse2 flux container …`):
   - `list` — filters: `state` (running/exited/paused/restarting/all), `name_filter`, `image_filter` (case-insensitive substring), `label_filter` (`key=value`, bollard server-side).
   - `logs` — one-shot tail (`follow=false`); `lines` (1–500, default 50), `since`/`until` (ISO 8601, unix seconds, or relative `"1h"`/`"30m"`), `grep` (substring filter on lines), `stream` (stdout/stderr/both).

@@ -236,6 +236,24 @@ impl Confirmer for NoConfirm {
     }
 }
 
+// ── DenyConfirm ───────────────────────────────────────────────────────────────
+
+/// Zero-sized always-`Err(Unsupported)` [`Confirmer`].
+///
+/// Used by the REST surface, which has no elicitation channel — there is no way
+/// to obtain interactive confirmation over a one-shot HTTP request, so a
+/// destructive op is hard-denied as `Unsupported` (unless the
+/// `SYNAPSE_MCP_ALLOW_DESTRUCTIVE` override substitutes [`NoConfirm`]).
+#[derive(Debug, Default, Clone, Copy)]
+pub struct DenyConfirm;
+
+#[async_trait::async_trait]
+impl Confirmer for DenyConfirm {
+    async fn require(&self, _op: &str, _details: &str) -> Result<(), ConfirmationDenied> {
+        Err(ConfirmationDenied::Unsupported)
+    }
+}
+
 #[cfg(test)]
 #[path = "elicitation_gate_tests.rs"]
 mod tests;

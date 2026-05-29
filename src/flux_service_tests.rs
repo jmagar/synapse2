@@ -18,7 +18,9 @@ async fn test_flux_help_shape() {
     assert_eq!(result["tool"], "flux");
     assert_eq!(
         result["actions"]["docker"],
-        serde_json::json!(["info", "images", "networks", "volumes"])
+        serde_json::json!([
+            "info", "df", "images", "networks", "volumes", "pull", "build", "rmi", "prune"
+        ])
     );
     assert_eq!(
         result["actions"]["container"],

@@ -192,12 +192,32 @@ pub struct ContainerArgs {
     pub query: Option<String>,
 }
 
+/// Parsed parameters for `flux docker` subactions.
+///
+/// Boxed inside [`SynapseAction::FluxDocker`] (and mirrored by the CLI) so the
+/// enum stays small. Extraction stays in the shim; all logic (validation,
+/// fanout, gating) lives in `FluxService` / the `docker` submodule.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct DockerArgs {
+    pub subaction: String,
+    pub host: Option<String>,
+    // images
+    pub dangling_only: Option<bool>,
+    // pull / rmi / build
+    pub image: Option<String>,
+    pub force: Option<bool>,
+    pub context: Option<String>,
+    pub tag: Option<String>,
+    pub dockerfile: Option<String>,
+    pub no_cache: Option<bool>,
+    // prune
+    pub prune_target: Option<String>,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum SynapseAction {
     FluxHelp,
-    FluxDocker {
-        subaction: String,
-    },
+    FluxDocker(Box<DockerArgs>),
     FluxContainer(Box<ContainerArgs>),
     FluxHost {
         subaction: String,
@@ -220,7 +240,7 @@ impl SynapseAction {
     pub fn name(&self) -> &'static str {
         match self {
             Self::FluxHelp | Self::ScoutHelp => "help",
-            Self::FluxDocker { .. } => "docker",
+            Self::FluxDocker(_) => "docker",
             Self::FluxContainer(_) => "container",
             Self::FluxHost { .. } => "host",
             Self::ScoutNodes => "nodes",
@@ -236,9 +256,18 @@ impl SynapseAction {
             .ok_or(ValidationError::MissingAction)?;
         match action {
             "help" => Ok(Self::FluxHelp),
-            "docker" => Ok(Self::FluxDocker {
+            "docker" => Ok(Self::FluxDocker(Box::new(DockerArgs {
                 subaction: required_string_param(args, "subaction")?,
-            }),
+                host: optional_string_param(args, "host")?,
+                dangling_only: optional_bool_param(args, "dangling_only")?,
+                image: optional_string_param(args, "image")?,
+                force: optional_bool_param(args, "force")?,
+                context: optional_string_param(args, "context")?,
+                tag: optional_string_param(args, "tag")?,
+                dockerfile: optional_string_param(args, "dockerfile")?,
+                no_cache: optional_bool_param(args, "no_cache")?,
+                prune_target: optional_string_param(args, "prune_target")?,
+            }))),
             "container" => {
                 // Validate `response_format` at the shim per B4 contract (no-op
                 // on output shape today; full rendering wiring is a separate
@@ -303,19 +332,11 @@ impl SynapseAction {
 pub async fn execute_service_action(
     service: &SynapseService,
     action: &SynapseAction,
+    confirmer: &dyn crate::elicitation_gate::Confirmer,
 ) -> Result<Value> {
     match action {
         SynapseAction::FluxHelp => service.flux().help().await,
-        SynapseAction::FluxDocker { subaction } => match subaction.as_str() {
-            "info" => service.flux().docker_info().await,
-            "images" => service.flux().docker_images().await,
-            "networks" => service.flux().docker_networks().await,
-            "volumes" => service.flux().docker_volumes().await,
-            other => Err(ValidationError::UnknownAction {
-                action: format!("docker:{other}"),
-            }
-            .into()),
-        },
+        SynapseAction::FluxDocker(args) => dispatch_flux_docker(service, args, confirmer).await,
         SynapseAction::FluxContainer(args) => dispatch_flux_container(service, args).await,
         SynapseAction::FluxHost { subaction, host } => match subaction.as_str() {
             "status" => service.flux().host_status(host.as_deref()).await,
@@ -332,6 +353,76 @@ pub async fn execute_service_action(
             path,
             command,
         } => service.scout().exec(host, path, command).await,
+    }
+}
+
+/// Dispatch a `flux docker` subaction to the [`FluxService`].
+///
+/// Thin: validate/extract params and call the matching service method. The
+/// destructive gate (`build`/`rmi`/`prune`) is enforced INSIDE the service
+/// method via the supplied `confirmer` — never here.
+async fn dispatch_flux_docker(
+    service: &SynapseService,
+    args: &DockerArgs,
+    confirmer: &dyn crate::elicitation_gate::Confirmer,
+) -> Result<Value> {
+    use crate::flux_service::docker::{build_args, PruneTarget};
+    let flux = service.flux();
+    let host = args.host.as_deref();
+    match args.subaction.as_str() {
+        "info" => flux.docker_info(host).await,
+        "df" => flux.docker_df(host).await,
+        "images" => {
+            flux.docker_images(host, args.dangling_only.unwrap_or(false))
+                .await
+        }
+        "networks" => flux.docker_networks(host).await,
+        "volumes" => flux.docker_volumes(host).await,
+        "pull" => {
+            let image = require_field(&args.image, "image")?;
+            flux.docker_pull(require_field(&args.host, "host")?, image)
+                .await
+        }
+        "build" => {
+            let context = require_field(&args.context, "context")?;
+            let tag = require_field(&args.tag, "tag")?;
+            let built = build_args(
+                context,
+                tag,
+                args.dockerfile.as_deref(),
+                args.no_cache.unwrap_or(false),
+            )?;
+            flux.docker_build(require_field(&args.host, "host")?, built, confirmer)
+                .await
+        }
+        "rmi" => {
+            let image = require_field(&args.image, "image")?;
+            let force = args.force.unwrap_or(false);
+            if !force {
+                return Err(ValidationError::MissingField {
+                    field: "force (rmi requires force=true)".into(),
+                }
+                .into());
+            }
+            flux.docker_rmi(require_field(&args.host, "host")?, image, force, confirmer)
+                .await
+        }
+        "prune" => {
+            let target_str = require_field(&args.prune_target, "prune_target")?;
+            let target = PruneTarget::parse(target_str)?;
+            if !args.force.unwrap_or(false) {
+                return Err(ValidationError::MissingField {
+                    field: "force (prune requires force=true)".into(),
+                }
+                .into());
+            }
+            flux.docker_prune(require_field(&args.host, "host")?, target, confirmer)
+                .await
+        }
+        other => Err(ValidationError::UnknownAction {
+            action: format!("docker:{other}"),
+        }
+        .into()),
     }
 }
 
@@ -421,6 +512,15 @@ fn optional_string_param(params: &Value, name: &str) -> Result<Option<String>> {
     }
 }
 
+/// Require a non-empty optional string field, returning a `MissingField`
+/// validation error when absent or empty.
+fn require_field<'a>(value: &'a Option<String>, name: &str) -> Result<&'a str> {
+    value
+        .as_deref()
+        .filter(|s| !s.is_empty())
+        .ok_or_else(|| ValidationError::MissingField { field: name.into() }.into())
+}
+
 /// Require a `container_id` for single-container subactions.
 fn require_container_id(container_id: &Option<String>) -> Result<&str> {
     container_id
@@ -460,6 +560,15 @@ pub fn is_validation_error(error: &anyhow::Error) -> bool {
         || error
             .downcast_ref::<crate::app::ScaffoldIntentValidationError>()
             .is_some()
+}
+
+/// True when `error` is a destructive-op confirmation denial (B5 gate). The MCP
+/// boundary maps these to `ErrorData::invalid_request` (per the bead's
+/// hard-block contract), distinct from `invalid_params` validation errors.
+pub fn is_confirmation_denied(error: &anyhow::Error) -> bool {
+    error
+        .downcast_ref::<crate::elicitation_gate::ConfirmationDenied>()
+        .is_some()
 }
 
 #[cfg(test)]

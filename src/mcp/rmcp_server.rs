@@ -135,6 +135,14 @@ impl ServerHandler for SynapseRmcpServer {
                 );
                 tool_result_from_json(result)
             }
+            Err(error) if crate::actions::is_confirmation_denied(&error) => {
+                tracing::warn!(
+                    tool = %tool_name,
+                    elapsed_ms = started.elapsed().as_millis(),
+                    "MCP tool destructive op not confirmed"
+                );
+                Err(ErrorData::invalid_request(error.to_string(), None))
+            }
             Err(error) if crate::actions::is_validation_error(&error) => {
                 tracing::warn!(
                     tool = %tool_name,

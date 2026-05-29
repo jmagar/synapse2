@@ -17,8 +17,13 @@ async fn flux_help_returns_action_reference() {
 
 #[tokio::test]
 async fn flux_docker_info_is_safe_without_docker() {
+    // docker info now fans out across configured hosts via bollard (B10). With
+    // no reachable daemon the per-host op errors, but the aggregate shape is
+    // always present and the call never panics.
     let result = call_mcp_tool("flux", json!({ "action": "docker", "subaction": "info" })).await;
-    assert!(result.get("available").is_some());
+    assert!(result.get("count").is_some());
+    assert!(result.get("info").is_some());
+    assert!(result.get("partial").is_some());
 }
 
 #[tokio::test]

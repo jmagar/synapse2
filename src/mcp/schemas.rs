@@ -27,16 +27,24 @@ fn build_tool_definitions() -> Vec<Value> {
     vec![
         json!({
             "name": "flux",
-            "description": "Docker infrastructure management for synapse2. Supports read-only docker, container (list/inspect/logs/stats/top/search), and host status actions across one or all configured hosts.",
+            "description": "Docker infrastructure management for synapse2. Supports docker (info/df/images/networks/volumes/pull/build/rmi/prune), container (list/inspect/logs/stats/top/search), and host status actions across one or all configured hosts. build/rmi/prune are destructive and require confirmation.",
             "inputSchema": {
                 "type": "object",
                 "properties": {
                     "action": { "type": "string", "enum": ["help", "docker", "container", "host"] },
                     "subaction": {
                         "type": "string",
-                        "description": "For action=container: list|inspect|logs|stats|top|search. For action=docker: info|images|networks|volumes. For action=host: status."
+                        "description": "For action=container: list|inspect|logs|stats|top|search. For action=docker: info|df|images|networks|volumes|pull|build|rmi|prune. For action=host: status."
                     },
-                    "host": { "type": "string", "description": "Target host name; omit to fan out across all configured hosts." },
+                    "host": { "type": "string", "description": "Target host name; omit to fan out across all configured hosts for read-only docker/container ops. REQUIRED for docker pull/build/rmi/prune (single-host)." },
+                    "dangling_only": { "type": "boolean", "description": "docker images: only list dangling (untagged) images." },
+                    "image": { "type": "string", "description": "docker pull/rmi: image reference (e.g. nginx:latest)." },
+                    "force": { "type": "boolean", "description": "docker rmi/prune: must be true (required by docker; prune also requires confirmation)." },
+                    "context": { "type": "string", "description": "docker build: absolute build context path (no .., ~, or $ expansion)." },
+                    "tag": { "type": "string", "description": "docker build: image tag (-t)." },
+                    "dockerfile": { "type": "string", "description": "docker build: Dockerfile path relative to context (optional)." },
+                    "no_cache": { "type": "boolean", "description": "docker build: pass --no-cache." },
+                    "prune_target": { "type": "string", "enum": ["containers", "images", "volumes", "networks", "buildcache", "all"], "description": "docker prune: what to prune. 'all' prunes containers, images, volumes, networks, AND build cache." },
                     "container_id": { "type": "string", "description": "Container id or name (required for inspect/logs/top; optional for stats)." },
                     "lines": { "type": "integer", "minimum": 1, "maximum": 500, "description": "container logs: tail line count (default 50)." },
                     "state": { "type": "string", "enum": ["running", "exited", "paused", "restarting", "all"], "description": "container list: filter by state (default all)." },
