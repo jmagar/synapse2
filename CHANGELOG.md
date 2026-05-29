@@ -15,6 +15,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **flux compose operations (B13)** — 10 compose subactions reachable from both MCP (`flux` tool `action=compose`) and CLI (`synapse2 flux compose …`):
+  - `list` — run `docker compose ls --format json` on a host; returns discovered projects. Also invalidates the B12 cache via `refresh`.
+  - `refresh` — invalidate the B12 compose discovery cache for a host, forcing a re-scan on the next `list`.
+  - `status` — `docker compose ps --format json` for a project; optional `service` filter.
+  - `up` — `docker compose up -d`. Not destructive (creates, not destroys).
+  - `down` — `docker compose down [--volumes]`. **DESTRUCTIVE** — gated via B5 elicitation (`confirmer.require`). `remove_volumes=true` requires `force=true` (validated at service layer before the gate runs, not in the shim).
+  - `restart` — `docker compose restart`. **DESTRUCTIVE** — gated via B5 elicitation.
+  - `recreate` — `docker compose up -d --force-recreate`. **DESTRUCTIVE** — gated via B5 elicitation.
+  - `logs` — `docker compose logs [--tail N] [--since T] [<service>]`. Duration/timestamp forms passed through to docker compose unchanged. Not gated.
+  - `build` — `docker compose build [<service>]`. Not gated (parity with synapse-mcp; does not destroy state).
+  - `pull` — `docker compose pull [<service>]`. Not gated.
+  - All ops resolve the project's compose file via B12's `ComposeDiscovery.list()`, then invoke `docker compose -f <config_file> <subcommand>` over the B11 `HostExec` seam (local or SSH).
+- `src/flux_service/compose_ops.rs` — pure per-host compose op functions (`up_on_host`, `down_on_host`, `restart_on_host`, `recreate_on_host`, `status_on_host`, `logs_on_host`, `build_on_host`, `pull_on_host`, `list_on_host`) + `DownArgs` + `validate_down_args` + `ComposeLogOptions`.
+- `src/flux_service/compose_ops_tests.rs` — unit tests: argv construction for all 10 subactions, `validate_down_args` cross-field validation (remove_volumes/force), confirmer accept/deny behaviour.
 - **flux host full parity (B11)** — 9 host subactions reachable from both MCP (`flux` tool `action=host`) and CLI (`synapse2 flux host …`):
   - `status` — Docker connectivity probe + container count + failed systemd service count (best-effort), fans out across all hosts when `host` unspecified.
   - `info` — `uname -a` output, fans out when `host` unspecified.

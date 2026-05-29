@@ -14,12 +14,13 @@
 //! ```
 
 use crate::{
-    actions::{rest_help, ContainerArgs, DockerArgs, HostArgs},
+    actions::{rest_help, ComposeArgs, ContainerArgs, DockerArgs, HostArgs},
     app::SynapseService,
     config::SynapseConfig,
     synapse2::SynapseClient,
 };
 use anyhow::{anyhow, Result};
+use serde_json::{json, Value};
 
 // TEMPLATE: The doctor module is the §48 reference implementation.
 //           Import it from here and wire into run() below.
@@ -55,6 +56,16 @@ pub const USAGE: &str = "Usage:
   synapse2 flux host mounts --host HOST
   synapse2 flux host ports --host HOST [--protocol tcp|udp] [--limit N] [--offset N]
   synapse2 flux host doctor --host HOST [--checks c1,c2,...]
+  synapse2 flux compose list --host HOST
+  synapse2 flux compose status --host HOST --project P [--service SVC]
+  synapse2 flux compose up --host HOST --project P
+  synapse2 flux compose down --host HOST --project P [--remove-volumes --force]
+  synapse2 flux compose restart --host HOST --project P
+  synapse2 flux compose recreate --host HOST --project P
+  synapse2 flux compose logs --host HOST --project P [--lines N] [--since T] [--service SVC]
+  synapse2 flux compose build --host HOST --project P [--service SVC]
+  synapse2 flux compose pull --host HOST --project P [--service SVC]
+  synapse2 flux compose refresh --host HOST
   synapse2 scout nodes
   synapse2 scout peek --host HOST --path PATH
   synapse2 scout exec --host HOST --path PATH --command CMD
@@ -90,6 +101,7 @@ pub enum Command {
     /// (shared with [`crate::actions::SynapseAction`]) so the enum stays small.
     FluxContainer(Box<ContainerArgs>),
     FluxHost(Box<crate::actions::HostArgs>),
+    FluxCompose(Box<crate::actions::ComposeArgs>),
     ScoutNodes,
     ScoutPeek {
         host: String,
@@ -400,6 +412,98 @@ pub async fn run(cmd: Command, cfg: &SynapseConfig) -> Result<()> {
                 other => return Err(anyhow!("unknown flux host subaction `{other}`")),
             }
         }
+        Command::FluxCompose(args) => {
+            use crate::flux_service::compose_ops::{ComposeLogOptions, DownArgs};
+            let flux = service.flux();
+            let host = args
+                .host
+                .as_deref()
+                .ok_or_else(|| anyhow!("flux compose requires --host"))?;
+            match args.subaction.as_str() {
+                "list" => {
+                    let projects = flux.compose_list(host).await?;
+                    let items: Vec<Value> = projects
+                        .iter()
+                        .map(|p| serde_json::to_value(p).unwrap_or(Value::Null))
+                        .collect();
+                    json!({ "host": host, "count": items.len(), "projects": items })
+                }
+                "refresh" => {
+                    flux.compose_refresh(Some(host));
+                    json!({ "host": host, "refreshed": true })
+                }
+                "status" => {
+                    let project = args
+                        .project
+                        .as_deref()
+                        .ok_or_else(|| anyhow!("compose status requires --project"))?;
+                    flux.compose_status(host, project, args.service.as_deref())
+                        .await?
+                }
+                "up" => {
+                    let project = args
+                        .project
+                        .as_deref()
+                        .ok_or_else(|| anyhow!("compose up requires --project"))?;
+                    flux.compose_up(host, project).await?
+                }
+                "down" => {
+                    let project = args
+                        .project
+                        .as_deref()
+                        .ok_or_else(|| anyhow!("compose down requires --project"))?;
+                    let down_args = DownArgs {
+                        remove_volumes: args.remove_volumes.unwrap_or(false),
+                        force: args.force.unwrap_or(false),
+                    };
+                    flux.compose_down(host, project, down_args, &confirmer)
+                        .await?
+                }
+                "restart" => {
+                    let project = args
+                        .project
+                        .as_deref()
+                        .ok_or_else(|| anyhow!("compose restart requires --project"))?;
+                    flux.compose_restart(host, project, &confirmer).await?
+                }
+                "recreate" => {
+                    let project = args
+                        .project
+                        .as_deref()
+                        .ok_or_else(|| anyhow!("compose recreate requires --project"))?;
+                    flux.compose_recreate(host, project, &confirmer).await?
+                }
+                "logs" => {
+                    let project = args
+                        .project
+                        .as_deref()
+                        .ok_or_else(|| anyhow!("compose logs requires --project"))?;
+                    let opts = ComposeLogOptions {
+                        lines: args.lines,
+                        since: args.since.clone(),
+                        service: args.service.clone(),
+                    };
+                    flux.compose_logs(host, project, opts).await?
+                }
+                "build" => {
+                    let project = args
+                        .project
+                        .as_deref()
+                        .ok_or_else(|| anyhow!("compose build requires --project"))?;
+                    flux.compose_build(host, project, args.service.as_deref())
+                        .await?
+                }
+                "pull" => {
+                    let project = args
+                        .project
+                        .as_deref()
+                        .ok_or_else(|| anyhow!("compose pull requires --project"))?;
+                    flux.compose_pull(host, project, args.service.as_deref())
+                        .await?
+                }
+                other => return Err(anyhow!("unknown flux compose subaction `{other}`")),
+            }
+        }
         Command::ScoutNodes => service.scout().nodes().await?,
         Command::ScoutPeek { host, path } => service.scout().peek(host, path).await?,
         Command::ScoutExec {
@@ -505,6 +609,32 @@ fn parse_flux(args: &[String]) -> Result<Command> {
                     .transpose()
                     .map_err(|_| anyhow!("--offset must be an integer"))?,
                 checks: parse_optional_named_value(rest, "--checks")?,
+            })))
+        }
+        [group, subaction, rest @ ..] if group == "compose" => {
+            // Valueless bool flags for compose.
+            const BOOL_FLAGS: &[&str] = &["--remove-volumes", "--force"];
+            let has_bool = |flag: &str| rest.iter().any(|a| a == flag);
+            let remove_volumes = has_bool("--remove-volumes");
+            let force = has_bool("--force");
+            let value_args: Vec<String> = rest
+                .iter()
+                .filter(|a| !BOOL_FLAGS.contains(&a.as_str()))
+                .cloned()
+                .collect();
+            let lines = parse_optional_named_value(&value_args, "--lines")?
+                .map(|v| v.parse::<u32>())
+                .transpose()
+                .map_err(|_| anyhow!("--lines must be an integer"))?;
+            Ok(Command::FluxCompose(Box::new(ComposeArgs {
+                subaction: subaction.clone(),
+                host: parse_optional_named_value(&value_args, "--host")?,
+                project: parse_optional_named_value(&value_args, "--project")?,
+                remove_volumes: remove_volumes.then_some(true),
+                force: force.then_some(true),
+                lines,
+                since: parse_optional_named_value(&value_args, "--since")?,
+                service: parse_optional_named_value(&value_args, "--service")?,
             })))
         }
         _ => Err(anyhow!("unknown flux command")),

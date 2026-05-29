@@ -95,6 +95,16 @@ pub const ACTION_SPECS: &[ActionSpec] = &[
         destructive: false,
     },
     ActionSpec {
+        name: "compose",
+        required_scope: Some(READ_SCOPE),
+        transport: ActionTransport::Any,
+        // The action spec marks the top-level action; destructive subactions
+        // (down/restart/recreate) are gated at the service layer via the
+        // Confirmer — not through the action spec flag (which is used for
+        // the schema-level readOnlyHint annotation only).
+        destructive: false,
+    },
+    ActionSpec {
         name: "nodes",
         required_scope: Some(READ_SCOPE),
         transport: ActionTransport::Any,
@@ -231,12 +241,37 @@ pub struct HostArgs {
     pub checks: Option<String>, // comma-separated check names
 }
 
+/// Parsed parameters for `flux compose` subactions (B13).
+///
+/// Boxed inside [`SynapseAction::FluxCompose`] so the enum stays small.
+/// Extraction lives in the shim; all logic lives in `FluxService`.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct ComposeArgs {
+    /// Subaction: list|status|up|down|restart|recreate|logs|build|pull|refresh.
+    pub subaction: String,
+    /// Target host name. Required for all subactions except `list` (where it is
+    /// also required — compose ops are always single-host).
+    pub host: Option<String>,
+    /// Compose project name. Required for all subactions except `list`/`refresh`.
+    pub project: Option<String>,
+    // down params
+    pub remove_volumes: Option<bool>,
+    pub force: Option<bool>,
+    // logs params
+    pub lines: Option<u32>,
+    pub since: Option<String>,
+    /// Single service filter for `logs`/`status`.
+    pub service: Option<String>,
+    // build/pull: same `service` field above
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum SynapseAction {
     FluxHelp,
     FluxDocker(Box<DockerArgs>),
     FluxContainer(Box<ContainerArgs>),
     FluxHost(Box<HostArgs>),
+    FluxCompose(Box<ComposeArgs>),
     ScoutHelp,
     ScoutNodes,
     ScoutPeek {
@@ -257,6 +292,7 @@ impl SynapseAction {
             Self::FluxDocker(_) => "docker",
             Self::FluxContainer(_) => "container",
             Self::FluxHost(_) => "host",
+            Self::FluxCompose(_) => "compose",
             Self::ScoutNodes => "nodes",
             Self::ScoutPeek { .. } => "peek",
             Self::ScoutExec { .. } => "exec",
@@ -317,6 +353,16 @@ impl SynapseAction {
                 offset: optional_u32_param(args, "offset")?,
                 checks: optional_string_param(args, "checks")?,
             }))),
+            "compose" => Ok(Self::FluxCompose(Box::new(ComposeArgs {
+                subaction: required_string_param(args, "subaction")?,
+                host: optional_string_param(args, "host")?,
+                project: optional_string_param(args, "project")?,
+                remove_volumes: optional_bool_param(args, "remove_volumes")?,
+                force: optional_bool_param(args, "force")?,
+                lines: optional_u32_param(args, "lines")?,
+                since: optional_string_param(args, "since")?,
+                service: optional_string_param(args, "service")?,
+            }))),
             other => Err(ValidationError::UnknownAction {
                 action: other.to_owned(),
             }
@@ -359,6 +405,7 @@ pub async fn execute_service_action(
         SynapseAction::FluxDocker(args) => dispatch_flux_docker(service, args, confirmer).await,
         SynapseAction::FluxContainer(args) => dispatch_flux_container(service, args).await,
         SynapseAction::FluxHost(args) => dispatch_flux_host(service, args).await,
+        SynapseAction::FluxCompose(args) => dispatch_flux_compose(service, args, confirmer).await,
         SynapseAction::ScoutHelp => service.scout().help().await,
         SynapseAction::ScoutNodes => service.scout().nodes().await,
         SynapseAction::ScoutPeek { host, path } => service.scout().peek(host, path).await,
@@ -540,6 +587,87 @@ async fn dispatch_flux_host(service: &SynapseService, args: &HostArgs) -> Result
         }
         other => Err(ValidationError::UnknownAction {
             action: format!("host:{other}"),
+        }
+        .into()),
+    }
+}
+
+/// Dispatch a `flux compose` subaction to the [`FluxService`].
+///
+/// Thin: validates required params and calls the matching service method.
+/// Gating (`down`/`restart`/`recreate`) is enforced INSIDE the service methods
+/// via the supplied `confirmer` — not here.
+async fn dispatch_flux_compose(
+    service: &SynapseService,
+    args: &ComposeArgs,
+    confirmer: &dyn crate::elicitation_gate::Confirmer,
+) -> Result<Value> {
+    use crate::flux_service::compose_ops::{ComposeLogOptions, DownArgs};
+    let flux = service.flux();
+    let host = require_field(&args.host, "host")?;
+    match args.subaction.as_str() {
+        "list" => {
+            let projects = flux.compose_list(host).await?;
+            let items: Vec<Value> = projects
+                .iter()
+                .map(|p| serde_json::to_value(p).unwrap_or(Value::Null))
+                .collect();
+            Ok(json!({
+                "host": host,
+                "count": items.len(),
+                "projects": items,
+            }))
+        }
+        "refresh" => {
+            flux.compose_refresh(Some(host));
+            Ok(json!({ "host": host, "refreshed": true }))
+        }
+        "status" => {
+            let project = require_field(&args.project, "project")?;
+            flux.compose_status(host, project, args.service.as_deref())
+                .await
+        }
+        "up" => {
+            let project = require_field(&args.project, "project")?;
+            flux.compose_up(host, project).await
+        }
+        "down" => {
+            let project = require_field(&args.project, "project")?;
+            let down_args = DownArgs {
+                remove_volumes: args.remove_volumes.unwrap_or(false),
+                force: args.force.unwrap_or(false),
+            };
+            flux.compose_down(host, project, down_args, confirmer).await
+        }
+        "restart" => {
+            let project = require_field(&args.project, "project")?;
+            flux.compose_restart(host, project, confirmer).await
+        }
+        "recreate" => {
+            let project = require_field(&args.project, "project")?;
+            flux.compose_recreate(host, project, confirmer).await
+        }
+        "logs" => {
+            let project = require_field(&args.project, "project")?;
+            let opts = ComposeLogOptions {
+                lines: args.lines,
+                since: args.since.clone(),
+                service: args.service.clone(),
+            };
+            flux.compose_logs(host, project, opts).await
+        }
+        "build" => {
+            let project = require_field(&args.project, "project")?;
+            flux.compose_build(host, project, args.service.as_deref())
+                .await
+        }
+        "pull" => {
+            let project = require_field(&args.project, "project")?;
+            flux.compose_pull(host, project, args.service.as_deref())
+                .await
+        }
+        other => Err(ValidationError::UnknownAction {
+            action: format!("compose:{other}"),
         }
         .into()),
     }
