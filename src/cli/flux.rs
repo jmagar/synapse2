@@ -55,17 +55,29 @@ fn parse_flux_docker(subaction: &str, rest: &[String]) -> Result<Command> {
 }
 
 fn parse_flux_container(subaction: &str, rest: &[String]) -> Result<Command> {
-    // `--summary` is a valueless bool flag; split it out before the
+    // `--summary` and `--pull` are valueless bool flags; split them out before the
     // value-pair parser (which requires a value after every flag).
+    const BOOL_FLAGS: &[&str] = &["--summary", "--no-pull"];
     let summary = rest.iter().any(|a| a == "--summary");
-    let value_args: Vec<String> = rest.iter().filter(|a| *a != "--summary").cloned().collect();
+    // `--no-pull` maps to pull=false for recreate; absent → pull=true (default).
+    let no_pull = rest.iter().any(|a| a == "--no-pull");
+    let value_args: Vec<String> = rest
+        .iter()
+        .filter(|a| !BOOL_FLAGS.contains(&a.as_str()))
+        .cloned()
+        .collect();
     let container_id = super::parse_optional_named_value(&value_args, "--container-id")?;
     let lines = super::parse_optional_named_value(&value_args, "--lines")?
         .map(|value| value.parse())
         .transpose()
         .map_err(|_| anyhow!("--lines must be an integer"))?;
-    // Validate `--response-format` for MCP/CLI parity (output stays JSON
-    // for the CLI today; an invalid value is still a hard error).
+    let exec_timeout_ms = super::parse_optional_named_value(&value_args, "--timeout")?
+        .map(|v: String| v.parse::<u64>())
+        .transpose()
+        .map_err(|_| anyhow!("--timeout must be a positive integer (milliseconds)"))?;
+    // `--command` collects everything after `--command` as argv tokens.
+    let command = parse_command_argv(&value_args);
+    // Validate `--response-format` for MCP/CLI parity.
     if let Some(rf) = super::parse_optional_named_value(&value_args, "--response-format")? {
         crate::formatters::ResponseFormat::parse(Some(&rf)).map_err(|e| anyhow!(e))?;
     }
@@ -84,7 +96,27 @@ fn parse_flux_container(subaction: &str, rest: &[String]) -> Result<Command> {
         stream: super::parse_optional_named_value(&value_args, "--stream")?,
         summary: summary.then_some(true),
         query: super::parse_optional_named_value(&value_args, "--query")?,
+        // B9 lifecycle params
+        command,
+        exec_user: super::parse_optional_named_value(&value_args, "--user")?,
+        exec_workdir: super::parse_optional_named_value(&value_args, "--workdir")?,
+        exec_timeout_ms,
+        pull: if no_pull { Some(false) } else { None },
     })))
+}
+
+/// Extract `--command ARG1 ARG2 ...` from the arg list.
+///
+/// Finds the index of `--command`, then collects all following tokens as the
+/// command argv. Tokens that look like other flags (start with `--`) but appear
+/// after `--command` are still collected — the user has quoted them or passed them
+/// as literal argv items to be exec'd inside the container.
+fn parse_command_argv(args: &[String]) -> Vec<String> {
+    let idx = args.iter().position(|a| a == "--command");
+    match idx {
+        Some(i) => args[i + 1..].to_vec(),
+        None => vec![],
+    }
 }
 
 fn parse_flux_host(subaction: &str, rest: &[String]) -> Result<Command> {
@@ -217,7 +249,14 @@ pub(super) async fn run_docker(
     Ok(result)
 }
 
-pub(super) async fn run_container(args: &ContainerArgs, service: &SynapseService) -> Result<Value> {
+pub(super) async fn run_container(
+    args: &ContainerArgs,
+    service: &SynapseService,
+    confirmer: &CliStderrWarn,
+) -> Result<Value> {
+    use crate::flux_service::container_lifecycle::{
+        ExecParams, RecreateParams, EXEC_TIMEOUT_DEFAULT_MS,
+    };
     use crate::flux_service::container_read::{ListFilters, LogOptions, DEFAULT_LOG_LINES};
     let ContainerArgs {
         subaction,
@@ -234,6 +273,11 @@ pub(super) async fn run_container(args: &ContainerArgs, service: &SynapseService
         stream,
         summary,
         query,
+        command,
+        exec_user,
+        exec_workdir,
+        exec_timeout_ms,
+        pull,
     } = args;
     let flux = service.flux();
     let host = host.as_deref();
@@ -279,6 +323,49 @@ pub(super) async fn run_container(args: &ContainerArgs, service: &SynapseService
                 stream: stream.clone().unwrap_or_else(|| "both".to_owned()),
             };
             flux.container_logs(host, id, opts).await?
+        }
+        // B9: simple lifecycle (start/stop/restart/pause/resume)
+        sa @ ("start" | "stop" | "restart" | "pause" | "resume") => {
+            let id = container_id
+                .as_deref()
+                .ok_or_else(|| anyhow!("container {sa} requires --container-id"))?;
+            flux.container_lifecycle(host, id, sa, confirmer).await?
+        }
+        // B9: pull container image
+        "pull" => {
+            let id = container_id
+                .as_deref()
+                .ok_or_else(|| anyhow!("container pull requires --container-id"))?;
+            flux.container_pull(host, id).await?
+        }
+        // B9: recreate
+        "recreate" => {
+            let id = container_id
+                .as_deref()
+                .ok_or_else(|| anyhow!("container recreate requires --container-id"))?;
+            let params = RecreateParams {
+                pull: pull.unwrap_or(true),
+            };
+            flux.container_recreate(host, id, params, confirmer).await?
+        }
+        // B9: exec
+        "exec" => {
+            if command.is_empty() {
+                return Err(anyhow!(
+                    "container exec requires --command BINARY [ARGS...]"
+                ));
+            }
+            let id = container_id
+                .as_deref()
+                .ok_or_else(|| anyhow!("container exec requires --container-id"))?;
+            let params = ExecParams {
+                container_id: id.to_owned(),
+                command: command.clone(),
+                user: exec_user.clone(),
+                workdir: exec_workdir.clone(),
+                timeout_ms: exec_timeout_ms.unwrap_or(EXEC_TIMEOUT_DEFAULT_MS),
+            };
+            flux.container_exec(host, params, confirmer).await?
         }
         other => return Err(anyhow!("unknown flux container subaction `{other}`")),
     };

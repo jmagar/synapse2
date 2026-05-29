@@ -354,6 +354,16 @@ pub(crate) fn optional_u32_param(params: &Value, name: &str) -> Result<Option<u3
     }
 }
 
+pub(crate) fn optional_u64_param(params: &Value, name: &str) -> Result<Option<u64>> {
+    match params.get(name) {
+        None => Ok(None),
+        Some(value) => value
+            .as_u64()
+            .map(Some)
+            .ok_or_else(|| ValidationError::WrongType { field: name.into() }.into()),
+    }
+}
+
 /// Extract an optional array of strings from `params[name]`.
 /// Returns an empty `Vec` when the key is absent; errors on type mismatch.
 pub(crate) fn optional_string_array_param(params: &Value, name: &str) -> Result<Vec<String>> {

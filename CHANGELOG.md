@@ -15,6 +15,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **container lifecycle subactions (B9)** — 8 new `flux container` subactions reachable from both MCP (`flux` tool) and CLI (`synapse2 flux container …`):
+  - `start`, `restart`, `pause`, `resume` — simple lifecycle ops; ungated (parity with synapse-mcp).
+  - `stop` — DESTRUCTIVE (B5 Confirmer gate before any IO); maps to Docker `stop`.
+  - `pull` — pull the latest image for THIS container's image (distinct from `docker pull`); ungated.
+  - `recreate` — DESTRUCTIVE (B5 Confirmer gate). Sequence: inspect → (pull if pull=true, default true) → stop → remove → create with same config (volumes/networks preserved from `HostConfig`/`NetworkingConfig`) → start. Returns original/new container IDs, image ref, and pull flag.
+  - `exec` — DESTRUCTIVE (B5 Confirmer gate). One-shot 3-step bollard exec: `create_exec` → `start_exec` → `inspect_exec`. Never shells via `sh -c` (pure execvp). Returns combined stdout + stderr + exit code. Timeout clamped to `[1000, 300000]ms`, default 30000ms, wrapped in `tokio::time::timeout`.
+- `src/flux_service/container_lifecycle.rs` — pure per-host lifecycle ops (`lifecycle_action_on_host`, `pull_image_on_host`, `recreate_on_host`, `exec_on_host`). Operates on `&dyn ContainerOps`/`&dyn ImageOps` — fully testable with `MockDockerClient`.
+- `src/flux_service/container_lifecycle_tests.rs` — 16 unit tests covering verb mapping, recreate action sequence (inspect→stop→remove→create→start), pull ordering, exec empty-command guard, timeout clamp, and `split_image_ref` edge cases.
+- `create_container` added to `ContainerOps` trait, `BollardClient` impl, and `MockDockerClient` (with `create_container_response` field for test scripting).
+- `optional_u64_param` helper added to `crate::actions` shared param helpers.
+
 - **scout simple actions (B14)** — 9 scout subactions reachable from both MCP (`scout` tool) and CLI (`synapse2 scout …`):
   - `nodes` — list all configured hosts (previously MVP, now fully wired to `ScoutService`).
   - `peek` — read a file or directory listing on a host. Adds `tree` (bool) and `depth` (1–10) params. Symlink check via `validate_safe_path` + remote via SSH `stat`+`cat`/`ls`.

@@ -8,16 +8,17 @@ use async_trait::async_trait;
 use bollard::container::LogOutput;
 use bollard::exec::{CreateExecResults, StartExecOptions, StartExecResults};
 use bollard::models::{
-    BuildPruneResponse, ContainerInspectResponse, ContainerPruneResponse, ContainerStatsResponse,
-    ContainerSummary, ContainerTopResponse, CreateImageInfo, ExecConfig, ExecInspectResponse,
-    ImageDeleteResponseItem, ImagePruneResponse, ImageSummary, Network, NetworkPruneResponse,
-    SystemDataUsageResponse, SystemInfo, VolumeListResponse, VolumePruneResponse,
+    BuildPruneResponse, ContainerCreateBody, ContainerCreateResponse, ContainerInspectResponse,
+    ContainerPruneResponse, ContainerStatsResponse, ContainerSummary, ContainerTopResponse,
+    CreateImageInfo, ExecConfig, ExecInspectResponse, ImageDeleteResponseItem, ImagePruneResponse,
+    ImageSummary, Network, NetworkPruneResponse, SystemDataUsageResponse, SystemInfo,
+    VolumeListResponse, VolumePruneResponse,
 };
 use bollard::query_parameters::{
-    CreateImageOptions, DataUsageOptions, InspectContainerOptions, ListContainersOptions,
-    ListImagesOptions, ListNetworksOptions, ListVolumesOptions, LogsOptions, PruneBuildOptions,
-    PruneContainersOptions, PruneImagesOptions, PruneNetworksOptions, PruneVolumesOptions,
-    RemoveImageOptions, StatsOptions, TopOptions,
+    CreateContainerOptions, CreateImageOptions, DataUsageOptions, InspectContainerOptions,
+    ListContainersOptions, ListImagesOptions, ListNetworksOptions, ListVolumesOptions, LogsOptions,
+    PruneBuildOptions, PruneContainersOptions, PruneImagesOptions, PruneNetworksOptions,
+    PruneVolumesOptions, RemoveImageOptions, StatsOptions, TopOptions,
 };
 
 use anyhow::Result;
@@ -81,6 +82,9 @@ pub struct MockDockerClient {
     /// (B10). The gate-decline test asserts this stays empty; the
     /// allow-destructive test asserts it is populated.
     pub mutations: std::sync::Mutex<Vec<MutatingOp>>,
+    /// Canned response for `create_container` (B9 recreate). If `None`, returns
+    /// a default with id `"new-container"`.
+    pub create_container_response: Option<ContainerCreateResponse>,
 }
 
 impl MockDockerClient {
@@ -194,6 +198,20 @@ impl ContainerOps for MockDockerClient {
     ) -> Result<ContainerPruneResponse, bollard::errors::Error> {
         self.record_mutation(MutatingOp::PruneContainers);
         Ok(self.container_prune.clone())
+    }
+
+    async fn create_container(
+        &self,
+        _options: Option<CreateContainerOptions>,
+        _config: ContainerCreateBody,
+    ) -> Result<ContainerCreateResponse, bollard::errors::Error> {
+        Ok(self
+            .create_container_response
+            .clone()
+            .unwrap_or(ContainerCreateResponse {
+                id: "new-container".to_owned(),
+                warnings: vec![],
+            }))
     }
 }
 

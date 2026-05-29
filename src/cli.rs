@@ -242,7 +242,7 @@ pub async fn run(cmd: Command, cfg: &SynapseConfig) -> Result<()> {
 
     let result = match &cmd {
         Command::FluxDocker(args) => flux::run_docker(args, &service, &confirmer).await?,
-        Command::FluxContainer(args) => flux::run_container(args, &service).await?,
+        Command::FluxContainer(args) => flux::run_container(args, &service, &confirmer).await?,
         Command::FluxHost(args) => flux::run_host(args, &service).await?,
         Command::FluxCompose(args) => flux::run_compose(args, &service, &confirmer).await?,
         Command::ScoutNodes

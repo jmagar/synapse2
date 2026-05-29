@@ -11,16 +11,17 @@ use async_trait::async_trait;
 use bollard::container::LogOutput;
 use bollard::exec::{CreateExecResults, StartExecOptions, StartExecResults};
 use bollard::models::{
-    BuildPruneResponse, ContainerInspectResponse, ContainerPruneResponse, ContainerStatsResponse,
-    ContainerSummary, ContainerTopResponse, CreateImageInfo, ExecConfig, ExecInspectResponse,
-    ImageDeleteResponseItem, ImagePruneResponse, ImageSummary, Network, NetworkPruneResponse,
-    SystemDataUsageResponse, SystemInfo, VolumeListResponse, VolumePruneResponse,
+    BuildPruneResponse, ContainerCreateBody, ContainerCreateResponse, ContainerInspectResponse,
+    ContainerPruneResponse, ContainerStatsResponse, ContainerSummary, ContainerTopResponse,
+    CreateImageInfo, ExecConfig, ExecInspectResponse, ImageDeleteResponseItem, ImagePruneResponse,
+    ImageSummary, Network, NetworkPruneResponse, SystemDataUsageResponse, SystemInfo,
+    VolumeListResponse, VolumePruneResponse,
 };
 use bollard::query_parameters::{
-    CreateImageOptions, DataUsageOptions, InspectContainerOptions, ListContainersOptions,
-    ListImagesOptions, ListNetworksOptions, ListVolumesOptions, LogsOptions, PruneBuildOptions,
-    PruneContainersOptions, PruneImagesOptions, PruneNetworksOptions, PruneVolumesOptions,
-    RemoveImageOptions, StatsOptions, TopOptions,
+    CreateContainerOptions, CreateImageOptions, DataUsageOptions, InspectContainerOptions,
+    ListContainersOptions, ListImagesOptions, ListNetworksOptions, ListVolumesOptions, LogsOptions,
+    PruneBuildOptions, PruneContainersOptions, PruneImagesOptions, PruneNetworksOptions,
+    PruneVolumesOptions, RemoveImageOptions, StatsOptions, TopOptions,
 };
 use futures_util::Stream;
 
@@ -101,6 +102,13 @@ pub trait ContainerOps: Send + Sync {
         &self,
         options: Option<PruneContainersOptions>,
     ) -> Result<ContainerPruneResponse, bollard::errors::Error>;
+
+    /// Create a new container from the supplied config (B9 `recreate`).
+    async fn create_container(
+        &self,
+        options: Option<CreateContainerOptions>,
+        config: ContainerCreateBody,
+    ) -> Result<ContainerCreateResponse, bollard::errors::Error>;
 }
 
 /// Lifecycle verbs for [`ContainerOps::container_action`].

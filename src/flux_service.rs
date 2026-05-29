@@ -34,6 +34,7 @@ use crate::synapse::HostConfig;
 pub mod compose_driver;
 pub mod compose_ops;
 pub mod container_driver;
+pub mod container_lifecycle;
 pub mod container_read;
 pub mod docker;
 pub mod docker_driver;
@@ -92,7 +93,10 @@ impl FluxService {
                     "info", "df", "images", "networks", "volumes",
                     "pull", "build", "rmi", "prune"
                 ],
-                "container": ["list", "inspect", "logs", "stats", "top", "search"],
+                "container": [
+                    "list", "inspect", "logs", "stats", "top", "search",
+                    "start", "stop", "restart", "pause", "resume", "pull", "recreate", "exec"
+                ],
                 "host": [
                     "status", "info", "uptime", "resources",
                     "services", "network", "mounts", "ports", "doctor"
@@ -103,8 +107,11 @@ impl FluxService {
                 ],
                 "help": []
             },
-            "destructive": ["docker build", "docker rmi", "docker prune", "compose down", "compose restart", "compose recreate"],
-            "deferred": ["destructive container lifecycle"],
+            "destructive": [
+                "docker build", "docker rmi", "docker prune",
+                "compose down", "compose restart", "compose recreate",
+                "container stop", "container recreate", "container exec"
+            ],
         }))
     }
 

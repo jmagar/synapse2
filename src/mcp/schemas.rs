@@ -27,14 +27,14 @@ fn build_tool_definitions() -> Vec<Value> {
     vec![
         json!({
             "name": "flux",
-            "description": "Docker infrastructure management for synapse2. Supports docker (info/df/images/networks/volumes/pull/build/rmi/prune), container (list/inspect/logs/stats/top/search), host status, and compose (list/status/up/down/restart/recreate/logs/build/pull/refresh) actions across configured hosts. build/rmi/prune and compose down/restart/recreate are destructive and require confirmation.",
+            "description": "Docker infrastructure management for synapse2. Supports docker (info/df/images/networks/volumes/pull/build/rmi/prune), container (list/inspect/logs/stats/top/search/start/stop/restart/pause/resume/pull/recreate/exec), host status, and compose (list/status/up/down/restart/recreate/logs/build/pull/refresh) actions across configured hosts. build/rmi/prune, compose down/restart/recreate, and container stop/recreate/exec are destructive and require confirmation.",
             "inputSchema": {
                 "type": "object",
                 "properties": {
                     "action": { "type": "string", "enum": ["help", "docker", "container", "host", "compose"] },
                     "subaction": {
                         "type": "string",
-                        "description": "For action=container: list|inspect|logs|stats|top|search. For action=docker: info|df|images|networks|volumes|pull|build|rmi|prune. For action=host: status|info|uptime|resources|services|network|mounts|ports|doctor. For action=compose: list|status|up|down|restart|recreate|logs|build|pull|refresh."
+                        "description": "For action=container: list|inspect|logs|stats|top|search|start|stop|restart|pause|resume|pull|recreate|exec. For action=docker: info|df|images|networks|volumes|pull|build|rmi|prune. For action=host: status|info|uptime|resources|services|network|mounts|ports|doctor. For action=compose: list|status|up|down|restart|recreate|logs|build|pull|refresh."
                     },
                     "host": { "type": "string", "description": "Target host name; omit to fan out across all configured hosts for read-only docker/container ops. REQUIRED for docker pull/build/rmi/prune (single-host) and all compose ops." },
                     "project": { "type": "string", "description": "compose: project name (required for all compose subactions except list/refresh)." },
@@ -60,7 +60,13 @@ fn build_tool_definitions() -> Vec<Value> {
                     "stream": { "type": "string", "enum": ["stdout", "stderr", "both"], "description": "container logs: which stream(s) to read (default both)." },
                     "summary": { "type": "boolean", "description": "container inspect: true = abbreviated info only." },
                     "query": { "type": "string", "description": "container search: full-text query over name + image + labels." },
-                    "response_format": { "type": "string", "enum": ["markdown", "json"], "description": "Output format (default markdown)." }
+                    "response_format": { "type": "string", "enum": ["markdown", "json"], "description": "Output format (default markdown)." },
+                    // B9: lifecycle params
+                    "command": { "type": "array", "items": { "type": "string" }, "description": "container exec: command argv — index 0 is the binary, rest are args. execvp semantics (no sh -c). Required for exec." },
+                    "exec_user": { "type": "string", "description": "container exec: optional user to run as inside the container (e.g. \"root\")." },
+                    "exec_workdir": { "type": "string", "description": "container exec: optional working directory inside the container." },
+                    "exec_timeout_ms": { "type": "integer", "minimum": 1000, "maximum": 300000, "description": "container exec: timeout in milliseconds [1000, 300000], default 30000." },
+                    "pull": { "type": "boolean", "description": "container recreate: whether to pull the latest image before recreating (default true)." }
                 },
                 "required": ["action"],
                 "additionalProperties": false

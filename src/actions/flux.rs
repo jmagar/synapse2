@@ -9,8 +9,9 @@ use serde_json::{json, Value};
 use crate::app::SynapseService;
 
 use super::{
-    optional_bool_param, optional_string_param, optional_u32_param, require_container_id,
-    require_field, required_string_param, ValidationError,
+    optional_bool_param, optional_string_array_param, optional_string_param, optional_u32_param,
+    optional_u64_param, require_container_id, require_field, required_string_param,
+    ValidationError,
 };
 
 // ── Arg structs ───────────────────────────────────────────────────────────────
@@ -41,6 +42,18 @@ pub struct ContainerArgs {
     pub summary: Option<bool>,
     // search param
     pub query: Option<String>,
+    // B9: lifecycle params
+    /// exec: command as argv (index 0 = binary, no shell). Required for exec.
+    /// Empty when not provided.
+    pub command: Vec<String>,
+    /// exec: optional user to run as.
+    pub exec_user: Option<String>,
+    /// exec: optional working directory inside container.
+    pub exec_workdir: Option<String>,
+    /// exec: timeout in ms, clamped [1000, 300000], default 30000.
+    pub exec_timeout_ms: Option<u64>,
+    /// recreate: whether to pull the image before recreating (default true).
+    pub pull: Option<bool>,
 }
 
 /// Parsed parameters for `flux docker` subactions.
@@ -153,6 +166,12 @@ impl super::SynapseAction {
                     stream: optional_string_param(args, "stream")?,
                     summary: optional_bool_param(args, "summary")?,
                     query: optional_string_param(args, "query")?,
+                    // B9 lifecycle params
+                    command: optional_string_array_param(args, "command")?,
+                    exec_user: optional_string_param(args, "exec_user")?,
+                    exec_workdir: optional_string_param(args, "exec_workdir")?,
+                    exec_timeout_ms: optional_u64_param(args, "exec_timeout_ms")?,
+                    pull: optional_bool_param(args, "pull")?,
                 })))
             }
             "host" => Ok(Self::FluxHost(Box::new(HostArgs {
@@ -255,15 +274,21 @@ pub(super) async fn dispatch_flux_docker(
     }
 }
 
-/// Dispatch a `flux container` read-only subaction to the [`FluxService`].
+/// Dispatch a `flux container` subaction to the [`FluxService`].
 ///
 /// Thin: extracts the parsed [`ContainerArgs`] and calls the matching service
 /// method. All filtering/fanout logic lives in `FluxService` /
-/// `container_read`.
+/// `container_read` (read-only) and `container_lifecycle` (B9 lifecycle).
+/// Destructive gate (`stop`/`recreate`/`exec`) is enforced INSIDE the service
+/// method via the supplied `confirmer` — never here.
 pub(super) async fn dispatch_flux_container(
     service: &SynapseService,
     args: &ContainerArgs,
+    confirmer: &dyn crate::elicitation_gate::Confirmer,
 ) -> Result<Value> {
+    use crate::flux_service::container_lifecycle::{
+        ExecParams, RecreateParams, EXEC_TIMEOUT_DEFAULT_MS,
+    };
     use crate::flux_service::container_read::{ListFilters, LogOptions, DEFAULT_LOG_LINES};
     let flux = service.flux();
     let host = args.host.as_deref();
@@ -309,6 +334,51 @@ pub(super) async fn dispatch_flux_container(
             };
             flux.container_logs(host, require_container_id(&args.container_id)?, opts)
                 .await
+        }
+        // B9: simple lifecycle (start/stop/restart/pause/resume)
+        sa @ ("start" | "stop" | "restart" | "pause" | "resume") => {
+            flux.container_lifecycle(
+                host,
+                require_container_id(&args.container_id)?,
+                sa,
+                confirmer,
+            )
+            .await
+        }
+        // B9: pull container image
+        "pull" => {
+            flux.container_pull(host, require_container_id(&args.container_id)?)
+                .await
+        }
+        // B9: recreate
+        "recreate" => {
+            let params = RecreateParams {
+                pull: args.pull.unwrap_or(true),
+            };
+            flux.container_recreate(
+                host,
+                require_container_id(&args.container_id)?,
+                params,
+                confirmer,
+            )
+            .await
+        }
+        // B9: exec
+        "exec" => {
+            if args.command.is_empty() {
+                return Err(ValidationError::MissingField {
+                    field: "command".into(),
+                }
+                .into());
+            }
+            let params = ExecParams {
+                container_id: require_container_id(&args.container_id)?.to_owned(),
+                command: args.command.clone(),
+                user: args.exec_user.clone(),
+                workdir: args.exec_workdir.clone(),
+                timeout_ms: args.exec_timeout_ms.unwrap_or(EXEC_TIMEOUT_DEFAULT_MS),
+            };
+            flux.container_exec(host, params, confirmer).await
         }
         other => Err(ValidationError::UnknownAction {
             action: format!("container:{other}"),

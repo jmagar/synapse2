@@ -27,7 +27,9 @@ pub async fn execute_service_action(
     match action {
         SynapseAction::FluxHelp => service.flux().help().await,
         SynapseAction::FluxDocker(args) => dispatch_flux_docker(service, args, confirmer).await,
-        SynapseAction::FluxContainer(args) => dispatch_flux_container(service, args).await,
+        SynapseAction::FluxContainer(args) => {
+            dispatch_flux_container(service, args, confirmer).await
+        }
         SynapseAction::FluxHost(args) => dispatch_flux_host(service, args).await,
         SynapseAction::FluxCompose(args) => dispatch_flux_compose(service, args, confirmer).await,
         SynapseAction::ScoutHelp => service.scout().help().await,

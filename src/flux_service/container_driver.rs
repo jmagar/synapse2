@@ -1,18 +1,22 @@
-//! `FluxService` driver methods for container read-only ops (B8).
+//! `FluxService` driver methods for container ops (B8 + B9).
 //!
 //! This module holds `impl FluxService` blocks that drive host resolution,
 //! bollard client acquisition, and multi-host fanout for container operations.
-//! The per-host logic lives in the pure `container_read` sibling module so it
-//! stays unit-testable with `MockDockerClient`.
+//! Read-only ops delegate to `container_read`; lifecycle ops delegate to
+//! `container_lifecycle`. Both pure modules are unit-testable with `MockDockerClient`.
 
 use anyhow::Result;
 use serde_json::{json, Value};
 
 use super::{
+    container_lifecycle::{self, ExecParams, RecreateParams},
     container_read::{self, ListFilters, LogOptions},
     flatten_list_outcome, FluxService,
 };
+use crate::docker_client::ContainerOps;
+use crate::elicitation_gate::Confirmer;
 use crate::fanout::fanout;
+use crate::scout;
 
 impl FluxService {
     /// List containers across target host(s), fanning out when `host` is unset.
@@ -192,5 +196,144 @@ impl FluxService {
             "container {container_id} not found on any host ({})",
             errors.join("; ")
         ))
+    }
+
+    // ── B9: container lifecycle ────────────────────────────────────────────
+
+    /// Perform a simple lifecycle action (start/stop/restart/pause/resume),
+    /// resolving the owning host when `host` is unspecified.
+    ///
+    /// `stop` is destructive — the caller MUST pass a gated `confirmer`.
+    pub async fn container_lifecycle(
+        &self,
+        host: Option<&str>,
+        container_id: &str,
+        subaction: &str,
+        confirmer: &dyn Confirmer,
+    ) -> Result<Value> {
+        // Gate before any IO.
+        if subaction == "stop" {
+            confirmer
+                .require("container stop", &format!("stop container {container_id}"))
+                .await
+                .map_err(|e| anyhow::anyhow!(e))?;
+        }
+        let subaction = subaction.to_owned();
+        self.find_host_op(host, container_id, move |client, host_name, id| {
+            let sub = subaction.clone();
+            Box::pin(async move {
+                container_lifecycle::lifecycle_action_on_host(client, host_name, id, &sub).await
+            })
+        })
+        .await
+    }
+
+    /// Pull the latest image for the given container's image on a single host.
+    /// Resolves the owning host first to discover the image ref.
+    /// Non-gated (parity with synapse-mcp).
+    pub async fn container_pull(&self, host: Option<&str>, container_id: &str) -> Result<Value> {
+        // Step 1: Inspect to get the image ref (find-host pattern).
+        let inspect_val = self
+            .find_host_op(host, container_id, |client, host_name, id| {
+                Box::pin(container_read::inspect_on_host(
+                    client, host_name, id, false,
+                ))
+            })
+            .await?;
+
+        let host_name = inspect_val
+            .get("host")
+            .and_then(Value::as_str)
+            .ok_or_else(|| anyhow::anyhow!("inspect returned no host"))?
+            .to_owned();
+        let image_ref = inspect_val
+            .pointer("/container/Config/Image")
+            .or_else(|| inspect_val.pointer("/container/config/Image"))
+            .or_else(|| inspect_val.pointer("/container/config/image"))
+            .and_then(Value::as_str)
+            .unwrap_or_default()
+            .to_owned();
+
+        // Step 2: Pull on the resolved host.
+        let h = scout::resolve_host(self.host_repo.as_ref(), &host_name)?;
+        let client = self.docker_clients.client_for(&h).await?;
+        container_lifecycle::pull_image_on_host(client.as_ref(), &h.name, &image_ref)
+            .await
+            .map_err(Into::into)
+    }
+
+    /// Recreate a container (inspect → pull → stop → remove → create → start).
+    /// DESTRUCTIVE — gated via the B5 Confirmer before any IO.
+    pub async fn container_recreate(
+        &self,
+        host: Option<&str>,
+        container_id: &str,
+        params: RecreateParams,
+        confirmer: &dyn Confirmer,
+    ) -> Result<Value> {
+        // Resolve the owning host first.
+        let hosts = self.target_hosts(host)?;
+        let h = if host.is_some() {
+            hosts[0].clone()
+        } else {
+            // Fan out to find owning host.
+            let mut found_host: Option<crate::synapse::HostConfig> = None;
+            for candidate in &hosts {
+                if let Ok(client) = self.docker_clients.client_for(candidate).await {
+                    let probe: &dyn ContainerOps = client.as_ref();
+                    if probe.inspect_container(container_id, None).await.is_ok() {
+                        found_host = Some(candidate.clone());
+                        break;
+                    }
+                }
+            }
+            found_host
+                .ok_or_else(|| anyhow::anyhow!("container {container_id} not found on any host"))?
+        };
+
+        // Gate before any IO.
+        confirmer
+            .require(
+                "container recreate",
+                &format!("recreate container {container_id} on {}", h.name),
+            )
+            .await
+            .map_err(|e| anyhow::anyhow!(e))?;
+
+        let client = self.docker_clients.client_for(&h).await?;
+        container_lifecycle::recreate_on_host(client.as_ref(), &h.name, container_id, &params)
+            .await
+            .map_err(Into::into)
+    }
+
+    /// Execute a command inside a container (one-shot exec, 3-step bollard).
+    /// DESTRUCTIVE — gated via the B5 Confirmer before any IO.
+    pub async fn container_exec(
+        &self,
+        host: Option<&str>,
+        params: ExecParams,
+        confirmer: &dyn Confirmer,
+    ) -> Result<Value> {
+        let container_id = params.container_id.clone();
+        // Gate before any IO.
+        confirmer
+            .require(
+                "container exec",
+                &format!(
+                    "{} on {}",
+                    params.command.first().map(|s| s.as_str()).unwrap_or(""),
+                    container_id
+                ),
+            )
+            .await
+            .map_err(|e| anyhow::anyhow!(e))?;
+
+        self.find_host_op(host, &container_id, move |client, host_name, _| {
+            let params = params.clone();
+            Box::pin(
+                async move { container_lifecycle::exec_on_host(client, host_name, &params).await },
+            )
+        })
+        .await
     }
 }
