@@ -168,6 +168,9 @@ jobs:
       - name: Check test sibling coverage
         run: cargo xtask check-test-siblings
 
+      - name: Check Rust module sizes (NO MONOLITHS)
+        run: bash scripts/check-rust-module-size.sh
+
       - name: Validate plugin layout
         run: bash scripts/validate-plugin-layout.sh
 

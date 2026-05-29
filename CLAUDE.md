@@ -39,6 +39,15 @@ A reusable Rust template for building MCP servers with the rmcp crate. The binar
 
 If you find yourself computing, filtering, transforming, or validating data in `tools.rs` or `cli.rs`, stop and move it to `app.rs`.
 
+## NO MONOLITHS — small, focused modules (enforced)
+
+This is a hard rule, enforced by a gate, not a suggestion.
+
+- **Line budget:** no Rust **production** module may exceed **420 real-code lines** (non-comment, non-blank, non-doc). Test files (`*_tests.rs`, `tests/`) are exempt. Enforced by `scripts/check-rust-module-size.sh` via the lefthook `file_size` pre-commit hook, `just module-size-check`, and CI (Template Contracts job). Run `just module-size-check` before committing. The limit ratchets down over time (420 → 400 → 300) as the codebase splits up — keep modules well under it.
+- **When a file approaches the budget, split it** into sibling modules: `foo.rs` + a `foo/` directory of focused submodules. **Never create `mod.rs`** (`xtask` bans it); declare submodules from `foo.rs`. Keep the matching `foo_tests.rs` sibling for each.
+- **No god-objects.** The service layer is **pre-split** into `FluxService` (Docker/container/host/compose) and `ScoutService` (host/SSH/filesystem ops). `SynapseService` is a **thin facade** that holds both (plus template `greet`/`echo`/`status`/`scaffold_intent`) — it must **not** accumulate domain logic or grow a long method list. When adding a `flux` action, put the method on `FluxService`; a `scout` action goes on `ScoutService`. Do not add domain methods directly to `SynapseService`.
+- **Why:** an unsupervised `lavra-work` run built `docker_client.rs` to 510 LOC and a 24-method `SynapseService` before this gate existed. The gate + the pre-split exist to prevent that. If you are a `lavra-work`/parity-port agent, **read this section before writing modules** — a monolithic file will fail CI and the pre-commit hook.
+
 ## How to add an action (4-file checklist)
 
 1. **`src/example.rs`** — add `pub async fn your_action(&self, ...) -> Result<Value>` with the actual HTTP/API call (or stub).
