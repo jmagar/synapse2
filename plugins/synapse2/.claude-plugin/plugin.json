@@ -1,15 +1,19 @@
 {
   "name": "synapse2",
-  "description": "TEMPLATE: Replace 'synapse2'/'Synapse2'/'EXAMPLE' with your service name throughout this file and throughout the entire plugin directory. This plugin connects Claude Code to the Synapse2 MCP server \u2014 a Rust-based MCP server built from rmcp-template.",
+  "description": "Connects Claude Code to the synapse2 MCP server — a Rust MCP + CLI server for Docker and SSH host management, exposing the flux (Docker/container/compose/host) and scout (SSH exec/filesystem/ZFS/logs) tools across configured infrastructure hosts.",
   "author": {
-    "name": "your-username"
+    "name": "jmagar"
   },
-  "repository": "https://github.com/your-org/synapse2",
+  "repository": "https://github.com/jmagar/synapse2",
+  "homepage": "https://github.com/jmagar/synapse2",
   "license": "MIT",
   "keywords": [
     "synapse2",
-    "mcp",
-    "template"
+    "docker",
+    "ssh",
+    "infrastructure",
+    "homelab",
+    "mcp"
   ],
   "mcpServers": "./.mcp.json",
   "hooks": "./hooks/hooks.json",
@@ -21,14 +25,14 @@
     "use_docker": {
       "type": "boolean",
       "title": "Deploy with Docker",
-      "description": "TEMPLATE: Keep this \u2014 both Docker and systemd deployment modes are useful defaults. True: run via docker compose (containerized, easier to upgrade, auto-restart). False: run as a systemd user service (lighter weight, no Docker dependency, logs to journald). Both produce identical behavior \u2014 pick based on your host conventions.",
+      "description": "Deployment method. True: run via docker compose (containerized, easier to upgrade, auto-restart). False: run as a systemd user service (lighter weight, no Docker dependency, logs to journald). Both produce identical behavior — pick based on your host conventions.",
       "required": true,
       "default": false
     },
     "server_url": {
       "type": "string",
       "title": "Server URL",
-      "description": "Base URL of the MCP HTTP server this Claude Code session connects to. If running locally: keep http://localhost:40060. If connecting to a remote server: set to http://hostname:40060 or https://synapse2.yourdomain.com. Do NOT include a trailing /mcp \u2014 the plugin appends it automatically.",
+      "description": "Base URL of the MCP HTTP server this Claude Code session connects to. If running locally: keep http://localhost:40060. If connecting to a remote server: set to http://hostname:40060 or https://synapse2.yourdomain.com. Do NOT include a trailing /mcp — the plugin appends it automatically.",
       "required": true,
       "default": "http://localhost:40060"
     },
@@ -42,7 +46,7 @@
     "no_auth": {
       "type": "boolean",
       "title": "Disable service auth",
-      "description": "Run the MCP server without authentication. ONLY safe when the server is bound to 127.x (loopback). Use this for local development only \u2014 never expose an unauthed MCP server on a network interface.",
+      "description": "Run the MCP server without authentication. ONLY safe when the server is bound to 127.x (loopback). Use this for local development only — never expose an unauthed MCP server on a network interface.",
       "required": true,
       "default": false
     },
@@ -79,18 +83,26 @@
       "description": "Bootstrap allowed Google account for OAuth mode. The server refuses to start OAuth mode without at least one allowlisted email address. Server mode only.",
       "default": ""
     },
+    "data_dir": {
+      "type": "directory",
+      "title": "Data directory",
+      "description": "Directory for runtime state (OAuth session DB, RS256 JWT signing key, SSH control sockets). Defaults to the plugin persistent data directory.",
+      "default": "${CLAUDE_PLUGIN_DATA}"
+    },
     "synapse_api_url": {
       "type": "string",
-      "title": "Service API URL",
-      "description": "TEMPLATE: Replace 'synapse_api_url' with your service's credential field name (e.g. 'myservice_api_url'). Your service's API endpoint \u2014 the URL this MCP server calls to fetch data. Synapse2: https://api.synapse2.com/v1. Maps to SYNAPSE_API_URL env var.",
+      "title": "Upstream service URL",
+      "description": "Optional upstream service base URL (SYNAPSE_API_URL). Consumed by the upstream-client facade and the synapse2 doctor health check; the core flux/scout tools drive Docker and SSH hosts directly and do not require this. Leave empty unless you connect a custom upstream endpoint.",
       "sensitive": true,
+      "required": false,
       "default": ""
     },
     "synapse_api_key": {
       "type": "string",
-      "title": "Service API key",
-      "description": "TEMPLATE: Replace 'synapse_api_key' with your service's credential field name (e.g. 'myservice_api_key'). API key or bearer token for authenticating to your upstream service. Maps to SYNAPSE_API_KEY env var. Never stored in config.toml.",
+      "title": "Upstream service API key",
+      "description": "Optional API key or bearer token (SYNAPSE_API_KEY) paired with synapse_api_url for the upstream-client facade. Maps to the SYNAPSE_API_KEY env var and is never stored in config.toml. Leave empty when only using flux/scout.",
       "sensitive": true,
+      "required": false,
       "default": ""
     }
   }

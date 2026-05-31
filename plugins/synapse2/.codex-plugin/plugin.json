@@ -1,21 +1,23 @@
 {
   "name": "synapse2",
-  "description": "TEMPLATE: Replace with a one-line description of your MCP server for the Codex plugin registry. E.g.: 'Gotify notification server MCP bridge for Codex.'",
+  "description": "MCP server for Docker and SSH host management — exposes flux (Docker/container/compose/host) and scout (SSH exec/filesystem/ZFS/logs) tools across configured infrastructure hosts.",
   "homepage": "https://github.com/jmagar/synapse2",
   "repository": "https://github.com/jmagar/synapse2",
   "license": "MIT",
   "keywords": [
     "synapse2",
-    "mcp",
-    "template",
-    "homelab"
+    "docker",
+    "ssh",
+    "infrastructure",
+    "homelab",
+    "mcp"
   ],
   "skills": "./skills/",
   "mcpServers": "./.mcp.json",
   "interface": {
     "displayName": "Synapse2 MCP",
-    "shortDescription": "TEMPLATE: Short tagline shown in Codex plugin listings (50 chars max). E.g.: 'Query and manage Synapse2 service'.",
-    "longDescription": "TEMPLATE: Full paragraph describing what this MCP server does, what data it exposes, what operations it supports, and what permissions it needs. This appears on the plugin detail page in Codex.",
+    "shortDescription": "Manage Docker and SSH hosts via flux and scout",
+    "longDescription": "MCP + CLI server for homelab infrastructure management. The flux tool covers Docker daemon, container lifecycle, host inspection, and Docker Compose operations across configured hosts. The scout tool covers SSH/local host inspection: filesystem reads, process listing, disk usage, ZFS pools/datasets/snapshots, log retrieval (syslog/journal/dmesg/auth), allowlisted command execution, multi-host fan-out, and file transfer. Read actions are safe; write actions (container stop/recreate/exec, compose down/restart/recreate, image build/rmi/prune, scout exec/emit/beam) are destructive and gated behind confirmation.",
     "developerName": "Jacob Magar",
     "category": "Infrastructure",
     "capabilities": [
@@ -24,13 +26,11 @@
     ],
     "websiteURL": "https://github.com/jmagar/synapse2",
     "defaultPrompt": [
-      "TEMPLATE: Replace with 3 natural-language prompts that demonstrate your server's most useful actions.",
-      "Check Synapse2 service status.",
-      "Show all available Synapse2 actions."
+      "List the running Docker containers on my host and show recent logs for one of them.",
+      "Check disk usage and ZFS pool health on my server over SSH.",
+      "Show the status of my Docker Compose projects and restart one that is unhealthy."
     ],
-    "brandColor": "#6366F1",
-    "composerIcon": "./assets/icon.png",
-    "logo": "./assets/logo.svg"
+    "brandColor": "#6366F1"
   },
   "author": {
     "name": "Jacob Magar",

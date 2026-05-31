@@ -1,10 +1,10 @@
 {
   "name": "synapse2",
-  "description": "TEMPLATE: Replace with a one-line description of your MCP server. E.g.: 'Gotify notification server MCP bridge for Gemini CLI.'",
+  "description": "MCP server for Docker and SSH host management — exposes flux (Docker/container/compose/host) and scout (SSH exec/filesystem/ZFS/logs) tools across configured infrastructure hosts.",
   "author": "Jacob Magar",
   "repository": "https://github.com/jmagar/synapse2",
   "license": "MIT",
-  "keywords": ["synapse2", "mcp", "template", "homelab"],
+  "keywords": ["synapse2", "docker", "ssh", "infrastructure", "homelab", "mcp"],
   "contextFileName": "GEMINI.md",
   "mcpServers": {
     "synapse2": {
@@ -32,12 +32,12 @@
     },
     {
       "name": "synapse_api_url",
-      "description": "TEMPLATE: Replace 'synapse_api_url' with your service's credential field name. Your upstream service API endpoint — the URL this MCP server calls to fetch data. Maps to SYNAPSE_API_URL env var.",
+      "description": "Optional upstream service base URL (SYNAPSE_API_URL). Consumed by the upstream-client facade and the synapse2 doctor health check; the core flux/scout tools drive Docker and SSH hosts directly and do not require this.",
       "required": false
     },
     {
       "name": "synapse_api_key",
-      "description": "TEMPLATE: Replace 'synapse_api_key' with your service's credential field name. API key or bearer token for your upstream service. Maps to SYNAPSE_API_KEY env var.",
+      "description": "Optional API key or bearer token (SYNAPSE_API_KEY) paired with synapse_api_url for the upstream-client facade. Leave empty when only using flux/scout.",
       "required": false,
       "sensitive": true
     }
