@@ -6,7 +6,10 @@
 
 use super::*;
 use crate::docker_client::MockDockerClient;
+use crate::ssh::CommandOutput;
+use async_trait::async_trait;
 use bollard::models::{ImageDeleteResponseItem, ImageSummary, Network};
+use std::sync::Mutex;
 
 // ───────────────────────────── split_image_ref ─────────────────────────────
 
@@ -158,6 +161,35 @@ async fn info_on_host_is_host_tagged() {
 }
 
 #[tokio::test]
+async fn daemon_id_reads_typed_system_info_id() {
+    let mock = MockDockerClient {
+        info: bollard::models::SystemInfo {
+            id: Some("daemon-123".to_owned()),
+            ..Default::default()
+        },
+        ..Default::default()
+    };
+
+    assert_eq!(
+        daemon_id(&mock).await.unwrap().as_deref(),
+        Some("daemon-123")
+    );
+}
+
+#[tokio::test]
+async fn daemon_id_preserves_missing_id_as_none() {
+    let mock = MockDockerClient {
+        info: bollard::models::SystemInfo {
+            id: None,
+            ..Default::default()
+        },
+        ..Default::default()
+    };
+
+    assert_eq!(daemon_id(&mock).await.unwrap(), None);
+}
+
+#[tokio::test]
 async fn df_on_host_is_host_tagged() {
     let mock = MockDockerClient::default();
     let v = df_on_host(&mock, "tootie").await.unwrap();
@@ -270,4 +302,67 @@ async fn prune_on_host_all_aggregates_every_target() {
     for key in ["containers", "images", "volumes", "networks", "buildcache"] {
         assert!(pruned.contains_key(key), "missing prune result for {key}");
     }
+}
+
+struct RecordingExec {
+    calls: Mutex<Vec<(String, Vec<String>)>>,
+    output: CommandOutput,
+}
+
+impl Default for RecordingExec {
+    fn default() -> Self {
+        Self {
+            calls: Mutex::new(Vec::new()),
+            output: CommandOutput {
+                stdout: String::new(),
+                stderr: String::new(),
+                exit_code: Some(0),
+            },
+        }
+    }
+}
+
+#[async_trait]
+impl HostExec for RecordingExec {
+    async fn run(&self, program: &str, args: &[&str]) -> anyhow::Result<CommandOutput> {
+        self.calls.lock().expect("call log").push((
+            program.to_owned(),
+            args.iter().map(|arg| (*arg).to_owned()).collect(),
+        ));
+        Ok(self.output.clone())
+    }
+}
+
+#[tokio::test]
+async fn build_on_host_runs_docker_build_through_exec_seam() {
+    let exec = RecordingExec {
+        output: CommandOutput {
+            stdout: "built".to_owned(),
+            stderr: String::new(),
+            exit_code: Some(0),
+        },
+        ..Default::default()
+    };
+    let args = build_args("/srv/app", "app:test", Some("docker/Dockerfile"), true).unwrap();
+
+    let value = build_on_host(&exec, "remote", &args).await.unwrap();
+
+    assert_eq!(value["host"], "remote");
+    assert_eq!(value["succeeded"], true);
+    assert_eq!(value["stdout"], "built");
+    assert_eq!(
+        exec.calls.lock().expect("call log").as_slice(),
+        [(
+            "docker".to_owned(),
+            vec![
+                "build".to_owned(),
+                "-t".to_owned(),
+                "app:test".to_owned(),
+                "--no-cache".to_owned(),
+                "-f".to_owned(),
+                "/srv/app/docker/Dockerfile".to_owned(),
+                "/srv/app".to_owned(),
+            ],
+        )]
+    );
 }

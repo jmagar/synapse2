@@ -13,6 +13,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 <!-- TEMPLATE: Add changes here as you work. They move to a version section on release. -->
 
+## [0.5.1] — 2026-06-06
+
 ### Added
 
 - **Reached full synapse-mcp parity (B17)** — all 59 production actions from

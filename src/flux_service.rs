@@ -21,11 +21,12 @@
 
 use anyhow::Result;
 use serde_json::{json, Map, Value};
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
 use crate::compose::ComposeDiscovery;
 use crate::docker_client::DockerClientCache;
-use crate::fanout::FanoutOutcome;
+use crate::fanout::{fanout, FanoutOutcome};
 use crate::host_config::HostRepository;
 use crate::mcp::help as help_module;
 use crate::scout;
@@ -108,6 +109,30 @@ impl FluxService {
         }
     }
 
+    /// Resolve Docker operation targets, deduping all-host fanout by Docker
+    /// daemon ID. This keeps aliases such as an SSH host name and the built-in
+    /// `local` fallback from reporting the same Docker device twice.
+    ///
+    /// Explicit `--host` requests are preserved exactly: `--host local` still
+    /// targets local even if another alias points at the same daemon.
+    pub(crate) async fn target_docker_hosts(&self, host: Option<&str>) -> Result<Vec<HostConfig>> {
+        let hosts = self.target_hosts(host)?;
+        if host.is_some() {
+            return Ok(hosts);
+        }
+
+        let clients = &self.docker_clients;
+        let discovery = fanout(&hosts, |h| async move {
+            let client = clients.client_for(&h).await.map_err(|e| e.to_string())?;
+            docker::daemon_id(client.as_ref())
+                .await
+                .map_err(|e| e.to_string())
+        })
+        .await;
+        let daemon_ids = daemon_discovery_results(discovery);
+        Ok(dedupe_hosts_by_daemon_id(hosts, &daemon_ids))
+    }
+
     /// Build a `HostExec` impl for the given host: `LocalExec` for local
     /// protocol / localhost, `RemoteExec` (SSH pool) for everything else.
     /// The returned value holds a reference into `&self.ssh_pool`, hence the
@@ -125,6 +150,53 @@ impl FluxService {
             })
         }
     }
+}
+
+type DaemonDiscoveryResult = (String, Result<Option<String>, String>);
+
+fn daemon_discovery_results(
+    discovery: FanoutOutcome<Option<String>, String>,
+) -> Vec<DaemonDiscoveryResult> {
+    let mut results = Vec::new();
+    match discovery {
+        FanoutOutcome::AllOk(ok) => {
+            results.extend(ok.into_iter().map(|(host, id)| (host, Ok(id))));
+        }
+        FanoutOutcome::PartialSuccess { ok, errors } => {
+            results.extend(ok.into_iter().map(|(host, id)| (host, Ok(id))));
+            results.extend(errors.into_iter().map(|(host, err)| (host, Err(err))));
+        }
+        FanoutOutcome::AllFailed(errors) => {
+            results.extend(errors.into_iter().map(|(host, err)| (host, Err(err))));
+        }
+    }
+    results
+}
+
+fn dedupe_hosts_by_daemon_id(
+    hosts: Vec<HostConfig>,
+    daemon_ids: &[DaemonDiscoveryResult],
+) -> Vec<HostConfig> {
+    let daemon_ids_by_host: HashMap<&str, &Result<Option<String>, String>> = daemon_ids
+        .iter()
+        .map(|(host, result)| (host.as_str(), result))
+        .collect();
+    let mut seen_daemons = HashSet::new();
+    let mut deduped = Vec::with_capacity(hosts.len());
+
+    for host in hosts {
+        match daemon_ids_by_host
+            .get(host.name.as_str())
+            .and_then(|result| result.as_ref().ok())
+            .and_then(|id| id.as_deref())
+        {
+            Some(id) if seen_daemons.insert(id.to_owned()) => deduped.push(host),
+            Some(_) => {}
+            None => deduped.push(host),
+        }
+    }
+
+    deduped
 }
 
 /// Flatten a fanout outcome whose per-host value is a `Vec<Value>` into one

@@ -16,7 +16,7 @@ resolver = "2"
 
 [package]
 name = "synapse2"
-version = "0.5.0"
+version = "0.5.1"
 edition = "2021"
 rust-version = "1.90"
 description = "Template for building MCP servers with the rmcp crate"

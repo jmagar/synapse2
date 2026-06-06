@@ -39,6 +39,8 @@ use serde_json::{json, Map, Value};
 
 use crate::docker_client::{ContainerOps, ImageOps, NetworkOps, SystemOps, VolumeOps};
 
+use super::host::HostExec;
+
 // ───────────────────────────── read-only ─────────────────────────────
 
 /// System-wide docker `info`, host-tagged.
@@ -49,6 +51,14 @@ pub async fn info_on_host(
     let info = client.info().await?;
     let body = serde_json::to_value(&info).unwrap_or(Value::Null);
     Ok(json!({ "host": host_name, "info": body }))
+}
+
+/// Return the Docker daemon ID from typed `SystemInfo`.
+///
+/// A daemon may omit `ID`; callers should treat `None` as "unknown" and avoid
+/// deduping that host away.
+pub async fn daemon_id(client: &dyn SystemOps) -> Result<Option<String>, bollard::errors::Error> {
+    Ok(client.info().await?.id)
 }
 
 /// Disk usage (`docker system df`), host-tagged.
@@ -405,31 +415,33 @@ pub fn build_args(
     })
 }
 
-/// Run `docker build` as a subprocess on the local host (locked bead decision:
-/// bollard's build API needs a streamed tar; subprocess is the sanctioned
-/// fallback). The destructive gate has already run at the service layer.
-pub async fn build_subprocess(host_name: &str, args: &BuildArgs) -> Result<Value> {
-    let mut cmd = tokio::process::Command::new("docker");
-    cmd.arg("build").arg("-t").arg(&args.tag);
+/// Run `docker build` on the selected host via the host execution seam.
+/// The destructive gate has already run at the service layer.
+pub async fn build_on_host(
+    exec: &dyn HostExec,
+    host_name: &str,
+    args: &BuildArgs,
+) -> Result<Value> {
+    let mut argv = vec!["build".to_string(), "-t".to_string(), args.tag.clone()];
     if args.no_cache {
-        cmd.arg("--no-cache");
+        argv.push("--no-cache".to_string());
     }
     if let Some(df) = &args.dockerfile {
         // Absolute Dockerfile path = context + relative dockerfile.
-        cmd.arg("-f").arg(format!("{}/{}", args.context, df));
+        argv.push("-f".to_string());
+        argv.push(format!("{}/{}", args.context, df));
     }
-    cmd.arg(&args.context);
-    let output = cmd.output().await?;
-    let stdout = String::from_utf8_lossy(&output.stdout).into_owned();
-    let stderr = String::from_utf8_lossy(&output.stderr).into_owned();
+    argv.push(args.context.clone());
+    let refs: Vec<&str> = argv.iter().map(String::as_str).collect();
+    let output = exec.run("docker", &refs).await?;
     Ok(json!({
         "host": host_name,
         "tag": args.tag,
         "context": args.context,
-        "succeeded": output.status.success(),
-        "exit_code": output.status.code(),
-        "stdout": stdout,
-        "stderr": stderr,
+        "succeeded": output.exit_code == Some(0),
+        "exit_code": output.exit_code,
+        "stdout": output.stdout,
+        "stderr": output.stderr,
     }))
 }
 

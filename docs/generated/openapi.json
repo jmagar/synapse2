@@ -2,7 +2,7 @@
   "openapi": "3.1.0",
   "info": {
     "title": "Example MCP REST API",
-    "version": "0.5.0",
+    "version": "0.5.1",
     "description": "Generated OpenAPI schema for rmcp-template's REST surface. TEMPLATE: rename Example identifiers and action schemas when adapting. Auth modes: loopback/trusted-gateway deployments may have no local auth; mounted bearer mode uses EXAMPLE_MCP_TOKEN; OAuth mode uses bearer JWTs. REST actions require their action-specific scopes when auth is mounted."
   },
   "servers": [

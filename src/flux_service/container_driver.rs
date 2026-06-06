@@ -22,7 +22,7 @@ impl FluxService {
     /// List containers across target host(s), fanning out when `host` is unset.
     /// Returns a flat host-tagged container list with a `partial`/`errors` block.
     pub async fn container_list(&self, host: Option<&str>, filters: ListFilters) -> Result<Value> {
-        let hosts = self.target_hosts(host)?;
+        let hosts = self.target_docker_hosts(host).await?;
         let clients = &self.docker_clients;
         let outcome = fanout(&hosts, |h| {
             let filters = filters.clone();
@@ -39,7 +39,7 @@ impl FluxService {
 
     /// Full-text search containers (name + image + labels) across target host(s).
     pub async fn container_search(&self, host: Option<&str>, query: &str) -> Result<Value> {
-        let hosts = self.target_hosts(host)?;
+        let hosts = self.target_docker_hosts(host).await?;
         let clients = &self.docker_clients;
         let filters = ListFilters::default();
         let outcome = fanout(&hosts, |h| {
@@ -83,7 +83,7 @@ impl FluxService {
                 .await;
         }
         // No id: fan out, collect per-host all-container stats.
-        let hosts = self.target_hosts(host)?;
+        let hosts = self.target_docker_hosts(host).await?;
         let clients = &self.docker_clients;
         let outcome = fanout(&hosts, |h| async move {
             let client = clients.client_for(&h).await.map_err(|e| e.to_string())?;

@@ -67,55 +67,51 @@ fn parse_flux_container(subaction: &str, rest: &[String]) -> Result<Command> {
         .filter(|a| !BOOL_FLAGS.contains(&a.as_str()))
         .cloned()
         .collect();
-    let container_id = super::parse_optional_named_value(&value_args, "--container-id")?;
-    let lines = super::parse_optional_named_value(&value_args, "--lines")?
+    let (option_args, command) = split_command_argv(&value_args);
+    let container_id = super::parse_optional_named_value(&option_args, "--container-id")?;
+    let lines = super::parse_optional_named_value(&option_args, "--lines")?
         .map(|value| value.parse())
         .transpose()
         .map_err(|_| anyhow!("--lines must be an integer"))?;
-    let exec_timeout_ms = super::parse_optional_named_value(&value_args, "--timeout")?
+    let exec_timeout_ms = super::parse_optional_named_value(&option_args, "--timeout")?
         .map(|v: String| v.parse::<u64>())
         .transpose()
         .map_err(|_| anyhow!("--timeout must be a positive integer (milliseconds)"))?;
-    // `--command` collects everything after `--command` as argv tokens.
-    let command = parse_command_argv(&value_args);
     // Validate `--response-format` for MCP/CLI parity.
-    let response_format = super::parse_optional_response_format(&value_args)?;
+    let response_format = super::parse_optional_response_format(&option_args)?;
     Ok(Command::FluxContainer(Box::new(ContainerArgs {
         response_format,
         subaction: subaction.to_owned(),
         container_id,
-        host: super::parse_optional_named_value(&value_args, "--host")?,
+        host: super::parse_optional_named_value(&option_args, "--host")?,
         lines,
-        state: super::parse_optional_named_value(&value_args, "--state")?,
-        name_filter: super::parse_optional_named_value(&value_args, "--name-filter")?,
-        image_filter: super::parse_optional_named_value(&value_args, "--image-filter")?,
-        label_filter: super::parse_optional_named_value(&value_args, "--label-filter")?,
-        since: super::parse_optional_named_value(&value_args, "--since")?,
-        until: super::parse_optional_named_value(&value_args, "--until")?,
-        grep: super::parse_optional_named_value(&value_args, "--grep")?,
-        stream: super::parse_optional_named_value(&value_args, "--stream")?,
+        state: super::parse_optional_named_value(&option_args, "--state")?,
+        name_filter: super::parse_optional_named_value(&option_args, "--name-filter")?,
+        image_filter: super::parse_optional_named_value(&option_args, "--image-filter")?,
+        label_filter: super::parse_optional_named_value(&option_args, "--label-filter")?,
+        since: super::parse_optional_named_value(&option_args, "--since")?,
+        until: super::parse_optional_named_value(&option_args, "--until")?,
+        grep: super::parse_optional_named_value(&option_args, "--grep")?,
+        stream: super::parse_optional_named_value(&option_args, "--stream")?,
         summary: summary.then_some(true),
-        query: super::parse_optional_named_value(&value_args, "--query")?,
+        query: super::parse_optional_named_value(&option_args, "--query")?,
         // B9 lifecycle params
         command,
-        exec_user: super::parse_optional_named_value(&value_args, "--user")?,
-        exec_workdir: super::parse_optional_named_value(&value_args, "--workdir")?,
+        exec_user: super::parse_optional_named_value(&option_args, "--user")?,
+        exec_workdir: super::parse_optional_named_value(&option_args, "--workdir")?,
         exec_timeout_ms,
         pull: if no_pull { Some(false) } else { None },
     })))
 }
 
-/// Extract `--command ARG1 ARG2 ...` from the arg list.
+/// Split `--command ARG1 ARG2 ...` out of the arg list.
 ///
-/// Finds the index of `--command`, then collects all following tokens as the
-/// command argv. Tokens that look like other flags (start with `--`) but appear
-/// after `--command` are still collected — the user has quoted them or passed them
-/// as literal argv items to be exec'd inside the container.
-fn parse_command_argv(args: &[String]) -> Vec<String> {
-    let idx = args.iter().position(|a| a == "--command");
-    match idx {
-        Some(i) => args[i + 1..].to_vec(),
-        None => vec![],
+/// Everything after `--command` is exec argv, including tokens such as `-c` or
+/// `--flag` that would be invalid for the normal named-value parser.
+fn split_command_argv(args: &[String]) -> (Vec<String>, Vec<String>) {
+    match args.iter().position(|a| a == "--command") {
+        Some(i) => (args[..i].to_vec(), args[i + 1..].to_vec()),
+        None => (args.to_vec(), Vec::new()),
     }
 }
 

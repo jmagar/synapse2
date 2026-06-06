@@ -24,7 +24,7 @@ impl FluxService {
 
     /// System info across target host(s), fanning out when `host` is unset.
     pub async fn docker_info(&self, host: Option<&str>) -> Result<Value> {
-        let hosts = self.target_hosts(host)?;
+        let hosts = self.target_docker_hosts(host).await?;
         let clients = &self.docker_clients;
         let outcome = fanout(&hosts, |h| async move {
             let client = clients.client_for(&h).await.map_err(|e| e.to_string())?;
@@ -38,7 +38,7 @@ impl FluxService {
 
     /// Disk usage (`docker system df`) across target host(s).
     pub async fn docker_df(&self, host: Option<&str>) -> Result<Value> {
-        let hosts = self.target_hosts(host)?;
+        let hosts = self.target_docker_hosts(host).await?;
         let clients = &self.docker_clients;
         let outcome = fanout(&hosts, |h| async move {
             let client = clients.client_for(&h).await.map_err(|e| e.to_string())?;
@@ -52,7 +52,7 @@ impl FluxService {
 
     /// List images across target host(s); `dangling_only` adds a server filter.
     pub async fn docker_images(&self, host: Option<&str>, dangling_only: bool) -> Result<Value> {
-        let hosts = self.target_hosts(host)?;
+        let hosts = self.target_docker_hosts(host).await?;
         let clients = &self.docker_clients;
         let outcome = fanout(&hosts, |h| async move {
             let client = clients.client_for(&h).await.map_err(|e| e.to_string())?;
@@ -66,7 +66,7 @@ impl FluxService {
 
     /// List networks across target host(s).
     pub async fn docker_networks(&self, host: Option<&str>) -> Result<Value> {
-        let hosts = self.target_hosts(host)?;
+        let hosts = self.target_docker_hosts(host).await?;
         let clients = &self.docker_clients;
         let outcome = fanout(&hosts, |h| async move {
             let client = clients.client_for(&h).await.map_err(|e| e.to_string())?;
@@ -80,7 +80,7 @@ impl FluxService {
 
     /// List volumes across target host(s).
     pub async fn docker_volumes(&self, host: Option<&str>) -> Result<Value> {
-        let hosts = self.target_hosts(host)?;
+        let hosts = self.target_docker_hosts(host).await?;
         let clients = &self.docker_clients;
         let outcome = fanout(&hosts, |h| async move {
             let client = clients.client_for(&h).await.map_err(|e| e.to_string())?;
@@ -124,7 +124,8 @@ impl FluxService {
                 &format!("build image {} on {}", args.tag, h.name),
             )
             .await?;
-        docker::build_subprocess(&h.name, &args).await
+        let exec = self.exec_for_host(&h);
+        docker::build_on_host(exec.as_ref(), &h.name, &args).await
     }
 
     /// Remove an image on a single host. DESTRUCTIVE: gated before IO.

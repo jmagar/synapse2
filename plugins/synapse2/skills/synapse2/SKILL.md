@@ -1,6 +1,6 @@
 ---
 name: synapse2
-description: Use when the user wants to inspect Docker infrastructure, manage containers or Compose stacks, read remote files and processes, run guarded SSH commands through synapse2, check ZFS pool health, list ZFS datasets, or manage ZFS snapshots.
+description: "Use for Synapse flux/scout Docker, Compose, SSH, logs, files, ZFS, host diagnostics, and remote allowlisted commands."
 ---
 
 # synapse2
@@ -11,6 +11,8 @@ Two MCP tools: **`flux`** for Docker/host inspection, **`scout`** for SSH/local
 host operations. All read-only ops use `synapse:read`; destructive ops
 (`stop`, `exec`, `rmi`, `prune`, compose `down/restart/recreate`, `emit`,
 `beam`) require `synapse:write` and go through a confirmation gate.
+
+Use these tools before falling back to direct SSH or Docker API calls.
 
 ## Quick Action Table
 
@@ -82,14 +84,15 @@ host operations. All read-only ops use `synapse:read`; destructive ops
 - **Read ops fan out** across all configured hosts when `host` is omitted;
   destructive ops always require an explicit `host`.
 - **`container exec` vs `scout exec`**: `container exec` runs inside a Docker
-  container (execvp, argv array); `scout exec` runs on the host via SSH
-  (allowlisted commands only, no shell).
+  container (literal argv array, so `--command sh -c "..."` is valid when you
+  explicitly want a shell inside the container); `scout exec` runs on the host
+  via SSH (allowlisted commands only, no shell).
 - **`scout exec` is allowlisted** — only:
   `cat`, `head`, `tail`, `grep`, `rg`, `find`, `ls`, `tree`, `wc`, `sort`,
   `uniq`, `diff`, `stat`, `file`, `du`, `df`, `pwd`, `hostname`, `uptime`,
   `whoami`. `git` is explicitly denied.
-- **Never pass shell metacharacters** (`|`, `>`, `&&`, `..`) — all execution is
-  execvp-style (no `sh -c`).
+- **For `scout exec`, never pass shell metacharacters** (`|`, `>`, `&&`, `..`);
+  host command execution is execvp-style and does not run through `sh -c`.
 - **Destructive ops need confirmation** via the MCP elicitation gate; declining
   returns an error without performing any IO.
 - **Responses are token-budgeted** — very long log tails or large directory
