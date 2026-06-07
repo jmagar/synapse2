@@ -54,7 +54,8 @@ git init -q "$TMPDIR_ROOT/repo"
   cp "$REPO_ROOT/scripts/block-env-commits.sh" .
   printf 'safe=true\n' > .env.example
   printf 'secret=true\n' > .env
-  git add .env.example .env
+  git add .env.example
+  git add -f .env
 )
 if (cd "$TMPDIR_ROOT/repo" && bash ./block-env-commits.sh >/dev/null 2>&1); then
   fail "env guard blocks staged .env (unexpected success)"

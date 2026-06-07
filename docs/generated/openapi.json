@@ -105,7 +105,7 @@
           "actions"
         ],
         "summary": "Dispatch a REST action",
-        "description": "Thin REST shim over the shared service layer. MCP-only actions are not exposed here. Current REST actions: help, docker, container, host, nodes, peek, exec. When auth is mounted, each action requires its declared scope; example:write satisfies example:read.",
+        "description": "Thin REST shim over the shared service layer. MCP-only actions are not exposed here. Current REST actions: help, docker, container, host, compose, nodes, peek, find, ps, df, delta, exec, emit, beam, zfs, logs. When auth is mounted, each action requires its declared scope; example:write satisfies example:read.",
         "operationId": "dispatchExampleAction",
         "security": [
           {
@@ -145,6 +145,12 @@
                     "params": {}
                   }
                 },
+                "compose": {
+                  "value": {
+                    "action": "compose",
+                    "params": {}
+                  }
+                },
                 "nodes": {
                   "value": {
                     "action": "nodes",
@@ -157,9 +163,57 @@
                     "params": {}
                   }
                 },
+                "find": {
+                  "value": {
+                    "action": "find",
+                    "params": {}
+                  }
+                },
+                "ps": {
+                  "value": {
+                    "action": "ps",
+                    "params": {}
+                  }
+                },
+                "df": {
+                  "value": {
+                    "action": "df",
+                    "params": {}
+                  }
+                },
+                "delta": {
+                  "value": {
+                    "action": "delta",
+                    "params": {}
+                  }
+                },
                 "exec": {
                   "value": {
                     "action": "exec",
+                    "params": {}
+                  }
+                },
+                "emit": {
+                  "value": {
+                    "action": "emit",
+                    "params": {}
+                  }
+                },
+                "beam": {
+                  "value": {
+                    "action": "beam",
+                    "params": {}
+                  }
+                },
+                "zfs": {
+                  "value": {
+                    "action": "zfs",
+                    "params": {}
+                  }
+                },
+                "logs": {
+                  "value": {
+                    "action": "logs",
                     "params": {}
                   }
                 }
@@ -211,9 +265,18 @@
           "docker",
           "container",
           "host",
+          "compose",
           "nodes",
           "peek",
-          "exec"
+          "find",
+          "ps",
+          "df",
+          "delta",
+          "exec",
+          "emit",
+          "beam",
+          "zfs",
+          "logs"
         ],
         "description": "REST-capable action names from src/actions.rs."
       },
@@ -444,9 +507,18 @@
       "docker",
       "container",
       "host",
+      "compose",
       "nodes",
       "peek",
-      "exec"
+      "find",
+      "ps",
+      "df",
+      "delta",
+      "exec",
+      "emit",
+      "beam",
+      "zfs",
+      "logs"
     ],
     "mcp_only_actions": []
   }

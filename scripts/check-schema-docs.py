@@ -12,12 +12,28 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 SCHEMAS_RS = ROOT / "src/mcp/schemas.rs"
 ACTION_RS = ROOT / "src/actions.rs"
-TOOLS_RS = ROOT / "src/mcp/tools.rs"
+HELP_RS = ROOT / "src/mcp/help.rs"
 PROMPTS_RS = ROOT / "src/mcp/prompts.rs"
-RMCP_SERVER_RS = ROOT / "src/mcp/rmcp_server.rs"
+RESOURCES_RS = ROOT / "src/mcp/resources.rs"
 README = ROOT / "README.md"
-SKILL = ROOT / "plugins/example/skills/example/SKILL.md"
+SKILL = ROOT / "plugins/synapse2/skills/synapse2/SKILL.md"
 DOC = ROOT / "docs/MCP_SCHEMA.md"
+
+FLUX_ACTIONS = {"help", "docker", "container", "host", "compose"}
+SCOUT_ACTIONS = {
+    "help",
+    "nodes",
+    "peek",
+    "find",
+    "ps",
+    "df",
+    "delta",
+    "exec",
+    "emit",
+    "beam",
+    "zfs",
+    "logs",
+}
 
 
 def read(path: Path) -> str:
@@ -43,33 +59,52 @@ def extract_scope_for_actions() -> dict[str, str]:
         if scope_expr == "None":
             scopes[name] = "public"
         elif scope_expr == "Some(READ_SCOPE)":
-            scopes[name] = "`example:read`"
+            scopes[name] = "`synapse:read`"
         elif scope_expr == "Some(WRITE_SCOPE)":
-            scopes[name] = "`example:write`"
+            scopes[name] = "`synapse:write`"
         else:
-            scopes[name] = "`example:__deny__`"
+            scopes[name] = "`synapse2:__deny__`"
     return scopes
 
 
 def action_description(action: str) -> str:
     descriptions = {
-        "greet": "Return a greeting. Optional `name` string.",
-        "echo": "Echo a required `message` string.",
-        "status": "Return server status and configuration summary.",
-        "elicit_name": "Ask the MCP client to elicit a name and return a personalized greeting.",
-        "scaffold_intent": "Elicit scaffold requirements and return JSON for the scaffold-project skill. Does not mutate files.",
         "help": "Return the in-tool action reference. Public; no scope required.",
+        "docker": "Docker daemon and image operations.",
+        "container": "Container read and lifecycle operations.",
+        "host": "Host status, resource, service, network, mount, port, and doctor operations.",
+        "compose": "Docker Compose project operations.",
+        "nodes": "List configured hosts.",
+        "peek": "Read a file or directory listing.",
+        "find": "Find files by glob.",
+        "ps": "List processes.",
+        "df": "Report disk usage.",
+        "delta": "Compare files or inline content.",
+        "exec": "Run an allowlisted command.",
+        "emit": "Run an allowlisted command across multiple targets.",
+        "beam": "Transfer a file between hosts.",
+        "zfs": "Read ZFS pools, datasets, and snapshots.",
+        "logs": "Read syslog, journal, dmesg, and auth logs.",
     }
     return descriptions.get(action, "TEMPLATE: document this action.")
+
+
+def action_tools(action: str) -> list[str]:
+    tools: list[str] = []
+    if action in FLUX_ACTIONS:
+        tools.append("flux")
+    if action in SCOUT_ACTIONS:
+        tools.append("scout")
+    return tools
 
 
 def render() -> str:
     actions = extract_actions()
     scopes = extract_scope_for_actions()
     lines = [
-        "# MCP Schema Contract",
+        "# synapse2 MCP Schema Contract",
         "",
-        "Generated from `src/actions.rs` and checked against the schema, README, skill docs, help text, and scope routing.",
+        "`synapse2` exposes two MCP tools: `flux` and `scout`.",
         "",
         "Run:",
         "",
@@ -80,52 +115,51 @@ def render() -> str:
         "",
         "## Tool",
         "",
-        "| Field | Value |",
-        "|---|---|",
-        "| Tool name | `example` |",
-        "| Schema resource | `example://schema/mcp-tool` |",
-        "| Dispatch parameter | `action` |",
+        "| Tool | Dispatch parameter | Purpose |",
+        "|---|---|---|",
+        "| `flux` | `action` | Docker, container, host, and compose operations |",
+        "| `scout` | `action` | SSH/local filesystem, process, ZFS, log, and command operations |",
         "",
         "## Actions",
         "",
-        "| Action | Scope | Description |",
-        "|---|---|---|",
+        "| Tool | Action | Scope | Description |",
+        "|---|---|---|---|",
     ]
     for action in actions:
         scope = scopes[action]
-        lines.append(f"| `{action}` | {scope} | {action_description(action)} |")
+        for tool in action_tools(action):
+            lines.append(f"| `{tool}` | `{action}` | {scope} | {action_description(action)} |")
     lines.extend(
         [
             "",
             "## Drift Rules",
             "",
             "- `ACTION_SPECS` in `src/actions.rs` is the canonical action and scope list.",
-            "- `src/mcp/schemas.rs` must derive its enum from `ACTION_SPECS`.",
-            "- The MCP tool schema must reject unknown top-level parameters and encode action-specific requirements that fit the single-tool dispatch model.",
+            "- `src/mcp/schemas.rs` must expose exactly the `flux` and `scout` tool schemas.",
+            "- Both MCP tool schemas must reject unknown top-level parameters.",
             "- `help` is intentionally public and must have no required scope.",
-            "- `src/mcp/tools.rs`, `README.md`, and `plugins/example/skills/example/SKILL.md` must mention every action.",
-            "- `src/mcp/rmcp_server.rs` owns stable resources and must keep `example://schema/mcp-tool` wired to `tool_definitions()`.",
+            "- `README.md`, `docs/API.md`, and `plugins/synapse2/skills/synapse2/SKILL.md` must mention every shipped action.",
+            "- `src/mcp/resources.rs` owns stable resources and must keep `synapse://schema/flux` and `synapse://schema/scout` wired to `tool_definitions()`.",
             "- `src/mcp/prompts.rs` owns stable prompts and must keep `quick_start` covered by prompt tests.",
             "",
             "## Resources",
             "",
             "| URI | Source | Contract |",
             "|---|---|---|",
-            "| `example://schema/mcp-tool` | `src/mcp/rmcp_server.rs` | Returns `tool_definitions()` as `application/json`. |",
+            "| `synapse://schema/flux` | `src/mcp/resources.rs` | Returns the `flux` schema from `tool_definitions()` as `application/json`. |",
+            "| `synapse://schema/scout` | `src/mcp/resources.rs` | Returns the `scout` schema from `tool_definitions()` as `application/json`. |",
             "",
             "## Prompts",
             "",
             "| Prompt | Source | Contract |",
             "|---|---|---|",
-            "| `quick_start` | `src/mcp/prompts.rs` | Guides a client to call `status` and `greet`. |",
+            "| `quick_start` | `src/mcp/prompts.rs` | Guides a client to call `scout` `nodes` and `flux` `host`. |",
             "",
             "## Input Validation",
             "",
             "- `action` is always required.",
-            "- `echo` conditionally requires non-empty `message`.",
-            "- `greet` accepts optional `name` and defaults to World.",
-            "- `elicit_name` and `scaffold_intent` collect their extra fields through MCP elicitation, not direct tool-call arguments.",
             "- Unknown top-level parameters are rejected by the schema.",
+            "- Destructive operations require `synapse:write` and a service-layer confirmation gate.",
             "",
         ]
     )
@@ -136,8 +170,8 @@ def check_mentions(actions: list[str]) -> list[str]:
     failures: list[str] = []
     surfaces = {
         "README.md": read(README),
-        "plugins/example/skills/example/SKILL.md": read(SKILL),
-        "src/mcp/tools.rs HELP_TEXT": read(TOOLS_RS),
+        "plugins/synapse2/skills/synapse2/SKILL.md": read(SKILL),
+        "src/mcp/help.rs": read(HELP_RS),
     }
     for label, text in surfaces.items():
         for action in actions:
@@ -157,15 +191,17 @@ def check_scope(actions: list[str]) -> list[str]:
         if scopes.get(action) == "public":
             failures.append(f"action `{action}` must declare a required scope")
     schema_text = read(SCHEMAS_RS)
-    if "action_names()" not in schema_text:
-        failures.append("src/mcp/schemas.rs must derive action enum from action_names()")
-    if '"additionalProperties": false' not in schema_text:
-        failures.append("src/mcp/schemas.rs must reject unknown top-level properties")
-    if '"const": "echo"' not in schema_text or '"required": ["message"]' not in schema_text:
-        failures.append("src/mcp/schemas.rs must conditionally require message for echo")
-    rmcp_server_text = read(RMCP_SERVER_RS)
-    if "example://schema/mcp-tool" not in rmcp_server_text or "tool_definitions()" not in rmcp_server_text:
-        failures.append("src/mcp/rmcp_server.rs must expose the schema resource from tool_definitions()")
+    if '"name": "flux"' not in schema_text or '"name": "scout"' not in schema_text:
+        failures.append("src/mcp/schemas.rs must expose flux and scout tool schemas")
+    if schema_text.count('"additionalProperties": false') < 2:
+        failures.append("src/mcp/schemas.rs must reject unknown top-level properties for both tools")
+    resources_text = read(RESOURCES_RS)
+    if (
+        "synapse://schema/flux" not in resources_text
+        or "synapse://schema/scout" not in resources_text
+        or "tool_definitions()" not in resources_text
+    ):
+        failures.append("src/mcp/resources.rs must expose flux and scout schema resources from tool_definitions()")
     prompts_text = read(PROMPTS_RS)
     if "quick_start" not in prompts_text:
         failures.append("src/mcp/prompts.rs must expose quick_start prompt")

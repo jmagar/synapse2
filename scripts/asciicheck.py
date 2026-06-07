@@ -25,6 +25,7 @@ SUBSTITUTIONS: dict[int, str] = {
 
 ALLOWED_UNICODE_CODEPOINTS: set[int] = {
     0x00A7,  # section sign in pattern references
+    0x00B7,  # middle dot used as a compact separator
     0x00D7,  # multiplication sign in dimensions
     0x2014,  # em dash used in docs/comments
     0x2013,  # en dash used in docs/comments
@@ -37,6 +38,10 @@ ALLOWED_UNICODE_CODEPOINTS: set[int] = {
     0x2248,  # approximately equal sign used in token/cost examples
     0x2264,  # less-than-or-equal sign used in docs
     0x2265,  # greater-than-or-equal sign used in docs
+    0x2287,  # superset-or-equal sign used in scope docs
+    0x25CB,  # hollow circle used in CLI status symbols
+    0x25CF,  # filled circle used in CLI status symbols
+    0x25D0,  # half circle used in CLI status symbols
     0x2500,  # box drawing chars used in section dividers/trees
     0x2501,
     0x2502,
