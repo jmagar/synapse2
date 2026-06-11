@@ -277,7 +277,7 @@ pub fn load_ssh_config_file(path: &Path) -> Result<Vec<HostConfig>> {
                 ssh_user,
                 ssh_key_path,
                 ssh_port: port,
-                ssh_config_path: None,
+                ssh_config_path: Some(path.to_string_lossy().into_owned()),
                 docker_socket_path: None,
                 tags: Vec::new(),
                 compose_search_paths: Vec::new(),

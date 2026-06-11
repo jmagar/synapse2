@@ -53,6 +53,7 @@ fn configure_builder(host: &HostConfig) -> (SessionBuilder, String) {
     let mut builder = SessionBuilder::default();
     builder
         .known_hosts_check(KnownHosts::Strict)
+        .control_directory("/tmp")
         .connect_timeout(CONNECT_TIMEOUT)
         .server_alive_interval(SERVER_ALIVE_INTERVAL);
 
@@ -68,19 +69,31 @@ fn configure_builder(host: &HostConfig) -> (SessionBuilder, String) {
     }
     if let Some(cfg) = &host.ssh_config_path {
         builder.config_file(cfg);
+        let known_hosts = std::path::Path::new(cfg)
+            .parent()
+            .map(|dir| dir.join("known_hosts"));
+        if let Some(path) = known_hosts {
+            builder.user_known_hosts_file(path);
+        }
     }
 
-    (builder, host.host.clone())
+    let destination = if host.ssh_config_path.is_some() {
+        host.name.clone()
+    } else {
+        host.host.clone()
+    };
+
+    (builder, destination)
 }
 
 /// Connect to `host` with the locked 5s outer timeout. Honors the builder
 /// `ConnectTimeout` too, but the outer `tokio::time::timeout` is authoritative.
 pub(crate) async fn connect(host: &HostConfig) -> Result<Session> {
     let (builder, destination) = configure_builder(host);
-    let fut = builder.connect_mux(&destination);
+    let fut = builder.connect(&destination);
     match tokio::time::timeout(CONNECT_TIMEOUT, fut).await {
         Ok(Ok(session)) => Ok(session),
-        Ok(Err(e)) => Err(anyhow!("ssh connect to {} failed: {e}", host.name)),
+        Ok(Err(e)) => Err(anyhow!("ssh connect to {} failed: {e:?}", host.name)),
         Err(_) => bail!(
             "ssh connect to {} timed out after {}s",
             host.name,

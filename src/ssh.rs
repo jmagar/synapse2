@@ -7,7 +7,7 @@
 //!
 //! Design (locked decisions — see bead rmcp-template-3tt.1):
 //!
-//! - **openssh crate, native-mux backend.** Requires the `ssh` binary at
+//! - **openssh crate, process-mux backend.** Requires the `ssh` binary at
 //!   runtime. Reuses `~/.ssh/config` and `~/.ssh/known_hosts` — no custom TOFU
 //!   store. `KnownHosts::Strict` rejects unknown/changed host keys (MITM).
 //! - **5s connect timeout** via `tokio::time::timeout` wrapping the connect.

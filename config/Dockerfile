@@ -92,7 +92,7 @@ FROM debian:bookworm-slim
 #           statically linked). Alpine users: replace gosu with su-exec and update
 #           entrypoint.sh accordingly.
 RUN apt-get update && \
-    apt-get install -y --no-install-recommends ca-certificates curl gosu openssh-client && \
+    apt-get install -y --no-install-recommends ca-certificates curl gosu openssh-client procps iproute2 docker.io && \
     rm -rf /var/lib/apt/lists/*
 
 # TEMPLATE: Replace "example" with your binary name in both COPY and target path.

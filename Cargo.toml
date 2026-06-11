@@ -76,9 +76,9 @@ ssh2-config = "0.7"
 anyhow = "1"
 
 # SSH transport (scout remote exec + flux forwarded docker socket).
-# native-mux backend: more robust, lower memory than process-mux. Requires the
-# `ssh` binary at runtime; reuses ~/.ssh/config and ~/.ssh/known_hosts.
-openssh = { version = "0.11", default-features = false, features = ["native-mux"] }
+# process-mux delegates command execution to OpenSSH's mux client, matching the
+# mux sockets created by local ssh configs on the managed fleet.
+openssh = "0.11"
 
 # Object-safe async trait (SshExecutor → Box<dyn SshExecutor>; Confirmer gate).
 async-trait = "0.1"

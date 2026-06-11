@@ -190,6 +190,10 @@ fn ssh_config_user_and_key_are_mapped() {
     let server1 = hosts.iter().find(|h| h.name == "server1").unwrap();
     assert_eq!(server1.ssh_user.as_deref(), Some("alice"));
     assert!(server1.ssh_key_path.is_some(), "ssh_key_path should be set");
+    assert!(
+        server1.ssh_config_path.is_some(),
+        "ssh_config_path should preserve alias semantics"
+    );
     assert_eq!(server1.protocol, HostProtocol::Ssh);
     assert_eq!(server1.host, "192.168.1.10");
 }
