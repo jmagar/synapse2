@@ -37,6 +37,15 @@ The template uses `EXAMPLE_*` variables. Rename the prefix when adapting the tem
 | `EXAMPLE_MCP_ALLOWED_ORIGINS` | unset | Extra CORS origins (comma-separated). |
 | `EXAMPLE_MCP_PUBLIC_URL` | unset | Public URL used for OAuth metadata endpoints. |
 | `EXAMPLE_MCP_AUTH_MODE` | `bearer` | `bearer` or `oauth`. |
+| `EXAMPLE_MCP_AUTH_SQLITE_PATH` | `/data/auth.db` | OAuth session/client database path. |
+| `EXAMPLE_MCP_AUTH_KEY_PATH` | `/data/auth-jwt.pem` | OAuth JWT signing key path. |
+| `EXAMPLE_MCP_AUTH_ACCESS_TOKEN_TTL_SECS` | `3600` | OAuth access-token TTL. |
+| `EXAMPLE_MCP_AUTH_REFRESH_TOKEN_TTL_SECS` | `2592000` | OAuth refresh-token TTL. |
+| `EXAMPLE_MCP_AUTH_CODE_TTL_SECS` | `300` | OAuth authorization-code TTL. |
+| `EXAMPLE_MCP_AUTH_REGISTER_REQUESTS_PER_MINUTE` | `10` | OAuth dynamic-registration rate limit. |
+| `EXAMPLE_MCP_AUTH_AUTHORIZE_REQUESTS_PER_MINUTE` | `60` | OAuth authorization rate limit. |
+| `EXAMPLE_MCP_AUTH_DISABLE_STATIC_TOKEN_WITH_OAUTH` | `true` | Disable static bearer tokens when OAuth is active. |
+| `EXAMPLE_MCP_AUTH_ALLOWED_REDIRECT_URIS` | unset | Extra OAuth redirect URI patterns (comma-separated). |
 
 ## OAuth mode
 
@@ -52,10 +61,10 @@ Only required when `EXAMPLE_MCP_AUTH_MODE=oauth`:
 
 | Variable | Purpose |
 |---|---|
-| `PUID` | UID to run the container as (default: 1000). |
-| `PGID` | GID to run the container as (default: 1000). |
+| `DOCKER_GID` | Host docker group id; required when the Docker socket is mounted. |
 | `DOCKER_NETWORK` | Docker network name (default: `mcp`). |
-| `VERSION` | Image tag to pull (default: `latest`). |
+| `EXAMPLE_VERSION` | Image tag to pull (default: `latest`). |
+| `EXAMPLE_MCP_HOST_PORT` | Host port published to the container MCP port. |
 
 ## Logging
 
@@ -68,7 +77,7 @@ Only required when `EXAMPLE_MCP_AUTH_MODE=oauth`:
 ## `.env` file structure
 
 ```bash
-# .env — secrets and URLs ONLY
+# .env — secrets, URLs, and deploy/runtime vars
 EXAMPLE_API_URL=https://example.internal/api
 EXAMPLE_API_KEY=your_api_key_here
 
@@ -80,8 +89,7 @@ EXAMPLE_MCP_TOKEN=your_bearer_token_here
 # EXAMPLE_MCP_GOOGLE_CLIENT_SECRET=...
 
 # Docker runtime
-PUID=1000
-PGID=1000
+DOCKER_GID=999
 DOCKER_NETWORK=mcp
 RUST_LOG=info
 ```
@@ -90,7 +98,9 @@ RUST_LOG=info
 
 `.env` and `.env.*` are ignored by `.gitignore` and blocked by `scripts/block-env-commits.sh`. Only `.env.example` belongs in git.
 
-Non-secret settings (host, port, auth mode, TTLs) go in `config.toml`, not `.env`. See `docs/CONFIG.md` for the full split.
+Non-secret settings usually go in `config.toml`; `.env` can override them for
+deploy-time secrets, logging, and runtime interpolation. Existing process env
+vars beat `.env`, and the appdata `.env` beats a current-directory `.env`.
 
 Generate a bearer token:
 

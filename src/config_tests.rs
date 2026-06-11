@@ -1,6 +1,75 @@
 //! Unit tests for src/config.rs
 
 use super::*;
+use std::sync::{Mutex, MutexGuard};
+
+static ENV_LOCK: Mutex<()> = Mutex::new(());
+
+const CONFIG_ENV_KEYS: &[&str] = &[
+    "SYNAPSE_HOME",
+    "RUNNING_IN_CONTAINER",
+    "container",
+    "SYNAPSE_MCP_HOST",
+    "SYNAPSE_MCP_PORT",
+    "SYNAPSE_MCP_SERVER_NAME",
+    "SYNAPSE_MCP_NO_AUTH",
+    "SYNAPSE_NOAUTH",
+    "SYNAPSE_MCP_ALLOW_DESTRUCTIVE",
+    "SYNAPSE_MCP_TOKEN",
+    "SYNAPSE_MCP_ALLOWED_HOSTS",
+    "SYNAPSE_MCP_ALLOWED_ORIGINS",
+    "SYNAPSE_MCP_PUBLIC_URL",
+    "SYNAPSE_MCP_AUTH_ADMIN_EMAIL",
+    "SYNAPSE_MCP_GOOGLE_CLIENT_ID",
+    "SYNAPSE_MCP_GOOGLE_CLIENT_SECRET",
+    "SYNAPSE_MCP_AUTH_SQLITE_PATH",
+    "SYNAPSE_MCP_AUTH_KEY_PATH",
+    "SYNAPSE_MCP_AUTH_ACCESS_TOKEN_TTL_SECS",
+    "SYNAPSE_MCP_AUTH_REFRESH_TOKEN_TTL_SECS",
+    "SYNAPSE_MCP_AUTH_CODE_TTL_SECS",
+    "SYNAPSE_MCP_AUTH_REGISTER_REQUESTS_PER_MINUTE",
+    "SYNAPSE_MCP_AUTH_AUTHORIZE_REQUESTS_PER_MINUTE",
+    "SYNAPSE_MCP_AUTH_DISABLE_STATIC_TOKEN_WITH_OAUTH",
+    "SYNAPSE_MCP_AUTH_ALLOWED_REDIRECT_URIS",
+    "SYNAPSE_MCP_AUTH_MODE",
+    "SYNAPSE_API_URL",
+    "RUST_LOG",
+];
+
+struct EnvSnapshot {
+    values: Vec<(&'static str, Option<String>)>,
+}
+
+impl EnvSnapshot {
+    fn capture(keys: &'static [&'static str]) -> Self {
+        let values = keys
+            .iter()
+            .map(|key| (*key, std::env::var(key).ok()))
+            .collect();
+        for key in keys {
+            std::env::remove_var(key);
+        }
+        Self { values }
+    }
+}
+
+impl Drop for EnvSnapshot {
+    fn drop(&mut self) {
+        for (key, value) in &self.values {
+            if let Some(value) = value {
+                std::env::set_var(key, value);
+            } else {
+                std::env::remove_var(key);
+            }
+        }
+    }
+}
+
+fn locked_env() -> (MutexGuard<'static, ()>, EnvSnapshot) {
+    let guard = ENV_LOCK.lock().unwrap();
+    let snapshot = EnvSnapshot::capture(CONFIG_ENV_KEYS);
+    (guard, snapshot)
+}
 
 // ── McpConfig::is_loopback edge cases ─────────────────────────────────────────
 
@@ -189,6 +258,75 @@ fn dotenv_quoted_values_unescape_quotes_and_backslashes() {
             "secret # \"quoted\" \\ token".to_string()
         )]
     );
+}
+
+#[test]
+fn config_load_reads_synapse_home_config() {
+    let (_lock, _env) = locked_env();
+    let appdata = tempfile::tempdir().unwrap();
+    std::env::set_var("SYNAPSE_HOME", appdata.path());
+
+    std::fs::write(
+        appdata.path().join("config.toml"),
+        r#"[mcp]
+host = "127.0.0.1"
+port = 40111
+"#,
+    )
+    .unwrap();
+    let config = Config::load().unwrap();
+    assert_eq!(config.mcp.host, "127.0.0.1");
+    assert_eq!(config.mcp.port, 40111);
+}
+
+#[test]
+fn config_example_toml_matches_typed_schema() {
+    let contents =
+        std::fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/config.example.toml"))
+            .unwrap();
+    assert!(
+        !contents.contains("[synapse2]"),
+        "upstream service settings belong in .env, not an ignored TOML table"
+    );
+    assert!(
+        !contents.contains("allowed_emails"),
+        "lab-auth allowed emails are managed by the OAuth store, not static TOML"
+    );
+    toml::from_str::<Config>(&contents).expect("config.example.toml should match Config schema");
+}
+
+#[test]
+fn dotenv_precedence_dirs_apply_cwd_before_synapse_home() {
+    let (_lock, _env) = locked_env();
+    let appdata = tempfile::tempdir().unwrap();
+    std::env::set_var("SYNAPSE_HOME", appdata.path());
+
+    let dirs = dotenv_precedence_dirs();
+    assert_eq!(
+        dirs,
+        vec![std::path::PathBuf::from("."), appdata.path().to_path_buf()]
+    );
+}
+
+#[test]
+fn load_dotenv_environment_seeds_runtime_vars_without_overriding_process_env() {
+    let (_lock, _env) = locked_env();
+    let appdata = tempfile::tempdir().unwrap();
+    std::env::set_var("SYNAPSE_HOME", appdata.path());
+    std::env::set_var("RUST_LOG", "warn");
+
+    std::fs::write(
+        appdata.path().join(".env"),
+        "SYNAPSE_API_URL=https://appdata.example\nRUST_LOG=info\n",
+    )
+    .unwrap();
+
+    load_dotenv_environment().unwrap();
+    assert_eq!(
+        std::env::var("SYNAPSE_API_URL").unwrap(),
+        "https://appdata.example"
+    );
+    assert_eq!(std::env::var("RUST_LOG").unwrap(), "warn");
 }
 
 // ── AuthMode serde parsing ────────────────────────────────────────────────────

@@ -74,14 +74,22 @@ services:
       dockerfile: config/Dockerfile
     container_name: example-mcp
     restart: unless-stopped
-    user: "${PUID:-1000}:${PGID:-1000}"
     env_file:
       - path: .env
         required: false
+    environment:
+      EXAMPLE_MCP_HOST: 0.0.0.0
+      EXAMPLE_MCP_PORT: "40080"
+      EXAMPLE_MCP_TOKEN: "${EXAMPLE_MCP_TOKEN:?set EXAMPLE_MCP_TOKEN or configure OAuth explicitly}"
     ports:
       - "${EXAMPLE_MCP_HOST_PORT:-40080}:40080/tcp"
     volumes:
       - ${HOME}/.example:/data
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ${HOME}/.ssh:/home/example/.ssh:ro
+    user: "1000:1000"
+    group_add:
+      - "${DOCKER_GID:?set DOCKER_GID from: getent group docker | cut -d: -f3}"
     networks:
       - mcp
     healthcheck:
@@ -105,7 +113,10 @@ networks:
 Key requirements:
 - `container_name` must be unique across your stack.
 - Use the `${DOCKER_NETWORK:-mcp}` external network.
-- `env_file.required: false` so the container starts without `.env` (relies on `config.toml` defaults).
+- Require a bearer token by default for non-loopback HTTP; use trusted gateway
+  mode only when an upstream proxy is the only reachable path.
+- Require `DOCKER_GID` when mounting `/var/run/docker.sock`; a guessed default
+  lets the container start but leaves Docker operations broken.
 - Resource limits to prevent runaway memory on homelab.
 
 Create the network if it doesn't exist:

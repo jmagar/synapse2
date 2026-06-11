@@ -86,12 +86,13 @@ FROM debian:bookworm-slim
 #   ca-certificates — TLS certificate verification for outbound HTTPS calls
 #   curl            — used by HEALTHCHECK
 #   gosu            — privilege drop in entrypoint.sh (exec as UID 1000:1000)
+#   openssh-client  — required by the openssh crate's native-mux backend
 #
 # TEMPLATE: Add other runtime libraries your binary needs (e.g. libssl1.1 if not
 #           statically linked). Alpine users: replace gosu with su-exec and update
 #           entrypoint.sh accordingly.
 RUN apt-get update && \
-    apt-get install -y --no-install-recommends ca-certificates curl gosu && \
+    apt-get install -y --no-install-recommends ca-certificates curl gosu openssh-client && \
     rm -rf /var/lib/apt/lists/*
 
 # TEMPLATE: Replace "example" with your binary name in both COPY and target path.

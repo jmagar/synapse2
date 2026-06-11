@@ -114,10 +114,11 @@ fi
 # When /var/run/docker.sock is bind-mounted (for the `flux` Docker tools), it is
 # typically owned by root:docker on the host. The service runs as UID 1000, so it
 # needs the socket's group as a supplementary group to reach the daemon. The GID
-# varies per host, so we detect it at runtime and (when present) drop privileges
-# with setpriv, setting UID/GID 1000 plus that supplementary group. setpriv needs
-# no writes to /etc, so this works under a read-only root filesystem. When there
-# is no socket (or setpriv is unavailable) we fall back to plain gosu 1000:1000.
+# varies per host. Production Compose starts as UID 1000 and supplies the group
+# with `group_add`; direct `docker run` invocations that start as root can use
+# this dynamic setpriv path. setpriv needs no writes to /etc, so it still works
+# under a read-only root filesystem. When there is no socket (or setpriv is
+# unavailable) we fall back to plain gosu 1000:1000.
 DOCKER_SOCK="${DOCKER_SOCK:-/var/run/docker.sock}"
 SOCK_GID=""
 if [ -S "${DOCKER_SOCK}" ]; then

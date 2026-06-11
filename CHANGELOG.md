@@ -20,7 +20,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   appdata dir at `/data` (where `default_data_dir()` resolves in-container), so
   the mounted `config.toml` / `.env` were never read. Loading now searches the
   resolved service data dir (`/data` in Docker, `~/.synapse2` bare-metal, or
-  `SYNAPSE_HOME`) and the current directory — see `config_search_dirs`.
+  `SYNAPSE_HOME`) and the current directory, with appdata `.env` taking priority
+  over a current-directory `.env` while existing process env remains final.
+- **Appdata `.env` now seeds runtime environment variables before logging.**
+  Values such as `RUST_LOG`, `NO_COLOR`, and upstream `SYNAPSE_API_*` settings
+  now work from the same appdata `.env` as the typed MCP auth settings.
+- **Docker image includes the SSH client required by `scout` and remote `flux`.**
+  The runtime image now installs `openssh-client`, matching the `openssh`
+  crate's native-mux backend requirement.
 
 ### Changed
 
@@ -29,12 +36,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `docker-compose.prod.yml` bind-mounts the operator's `~/.ssh` (read-only) there,
   so hosts in `~/.ssh/config` are auto-discovered into the fleet (`host_config.rs`).
 - **`flux` Docker tools can reach the daemon.** `docker-compose.prod.yml` now
-  bind-mounts `/var/run/docker.sock` and adds `group_add: ["${DOCKER_GID:-999}"]`
-  so the UID-1000 service has the host's docker group. `entrypoint.sh` also detects
-  the socket GID and preserves it via `setpriv` when it performs the privilege drop.
+  bind-mounts `/var/run/docker.sock` and requires `DOCKER_GID` so the UID-1000
+  service has the host's docker group. `entrypoint.sh` still detects the socket
+  GID for direct root-started `docker run` use.
+- **Production compose no longer defaults to trusted-gateway no-auth.**
+  `docker-compose.prod.yml` now requires `SYNAPSE_MCP_TOKEN` by default; operators
+  who intentionally rely on upstream auth can opt into `SYNAPSE_NOAUTH=true`.
 - **`.env.example` slimmed to secrets, URLs, and runtime vars only;** non-secret
   server tuning is documented in `config.example.toml`, which now also explains
   host-topology discovery from `~/.ssh/config`.
+- **The example TOML no longer documents ignored fields.** Unsupported entries
+  such as the fake upstream `[synapse2]` block and config-level OAuth allowed
+  email list were removed from `config.example.toml`.
 
 ## [0.5.1] — 2026-06-06
 

@@ -15,7 +15,7 @@ use rmcp::{transport::stdio, ServiceExt};
 use synapse2::{
     app::SynapseService,
     cli,
-    config::Config,
+    config::{load_dotenv_environment, Config},
     mcp,
     server::{self, resolve_auth_policy_kind, AppState, AuthPolicy, AuthPolicyKind},
 };
@@ -38,6 +38,8 @@ async fn main() -> Result<()> {
         }
         _ => {}
     }
+
+    load_dotenv_environment()?;
 
     // Suppress logs in stdio/CLI mode — MCP clients communicate over stdio
     // and cannot tolerate log lines mixed into the JSON stream.
@@ -208,7 +210,8 @@ async fn build_auth_policy(config: &Config) -> Result<AuthPolicy> {
                 .default_scope("synapse:read")
                 .resource_path("/mcp")
                 .enable_dynamic_registration(true)
-                .build_from_sources(vec![])
+                .disable_static_token_with_oauth(config.mcp.auth.disable_static_token_with_oauth)
+                .build_from_sources(auth_config_sources(config))
                 .map_err(|e| anyhow::anyhow!("OAuth config error: {e}"))?;
             let auth_state = lab_auth::state::AuthState::new(auth_cfg)
                 .await
@@ -217,6 +220,68 @@ async fn build_auth_policy(config: &Config) -> Result<AuthPolicy> {
                 auth_state: Some(Arc::new(auth_state)),
             })
         }
+    }
+}
+
+fn auth_config_sources(config: &Config) -> Vec<(String, String)> {
+    let auth = &config.mcp.auth;
+    let mut vars = vec![
+        ("SYNAPSE_MCP_AUTH_MODE".into(), "oauth".into()),
+        (
+            "SYNAPSE_MCP_AUTH_SQLITE_PATH".into(),
+            auth.sqlite_path.clone(),
+        ),
+        ("SYNAPSE_MCP_AUTH_KEY_PATH".into(), auth.key_path.clone()),
+        (
+            "SYNAPSE_MCP_AUTH_ACCESS_TOKEN_TTL_SECS".into(),
+            auth.access_token_ttl_secs.to_string(),
+        ),
+        (
+            "SYNAPSE_MCP_AUTH_REFRESH_TOKEN_TTL_SECS".into(),
+            auth.refresh_token_ttl_secs.to_string(),
+        ),
+        (
+            "SYNAPSE_MCP_AUTH_CODE_TTL_SECS".into(),
+            auth.auth_code_ttl_secs.to_string(),
+        ),
+        (
+            "SYNAPSE_MCP_AUTH_REGISTER_REQUESTS_PER_MINUTE".into(),
+            auth.register_rpm.to_string(),
+        ),
+        (
+            "SYNAPSE_MCP_AUTH_AUTHORIZE_REQUESTS_PER_MINUTE".into(),
+            auth.authorize_rpm.to_string(),
+        ),
+    ];
+    push_optional(&mut vars, "SYNAPSE_MCP_PUBLIC_URL", &auth.public_url);
+    push_optional(
+        &mut vars,
+        "SYNAPSE_MCP_GOOGLE_CLIENT_ID",
+        &auth.google_client_id,
+    );
+    push_optional(
+        &mut vars,
+        "SYNAPSE_MCP_GOOGLE_CLIENT_SECRET",
+        &auth.google_client_secret,
+    );
+    if !auth.admin_email.is_empty() {
+        vars.push((
+            "SYNAPSE_MCP_AUTH_ADMIN_EMAIL".into(),
+            auth.admin_email.clone(),
+        ));
+    }
+    if !auth.allowed_client_redirect_uris.is_empty() {
+        vars.push((
+            "SYNAPSE_MCP_AUTH_ALLOWED_REDIRECT_URIS".into(),
+            auth.allowed_client_redirect_uris.join(","),
+        ));
+    }
+    vars
+}
+
+fn push_optional(vars: &mut Vec<(String, String)>, key: &str, value: &Option<String>) {
+    if let Some(value) = value.as_ref().filter(|value| !value.is_empty()) {
+        vars.push((key.into(), value.clone()));
     }
 }
 
@@ -274,5 +339,43 @@ mod tests {
         let err = enforce_destructive_policy(&cfg(true, "0.0.0.0"))
             .expect_err("non-loopback + override must refuse to start");
         assert!(err.to_string().contains("non-loopback"));
+    }
+
+    #[test]
+    fn auth_config_sources_include_typed_oauth_settings() {
+        let mut config = Config::default();
+        config.mcp.auth.sqlite_path = "/tmp/auth.db".into();
+        config.mcp.auth.key_path = "/tmp/key.pem".into();
+        config.mcp.auth.access_token_ttl_secs = 120;
+        config.mcp.auth.refresh_token_ttl_secs = 240;
+        config.mcp.auth.auth_code_ttl_secs = 60;
+        config.mcp.auth.register_rpm = 3;
+        config.mcp.auth.authorize_rpm = 4;
+        config.mcp.auth.public_url = Some("https://synapse.example".into());
+        config.mcp.auth.google_client_id = Some("client-id".into());
+        config.mcp.auth.google_client_secret = Some("client-secret".into());
+        config.mcp.auth.admin_email = "admin@example.com".into();
+        config.mcp.auth.allowed_client_redirect_uris =
+            vec!["https://claude.ai/api/mcp/auth_callback".into()];
+
+        let vars = auth_config_sources(&config);
+        assert!(vars.contains(&("SYNAPSE_MCP_AUTH_SQLITE_PATH".into(), "/tmp/auth.db".into())));
+        assert!(vars.contains(&("SYNAPSE_MCP_AUTH_KEY_PATH".into(), "/tmp/key.pem".into())));
+        assert!(vars.contains(&(
+            "SYNAPSE_MCP_AUTH_ACCESS_TOKEN_TTL_SECS".into(),
+            "120".into()
+        )));
+        assert!(vars.contains(&(
+            "SYNAPSE_MCP_AUTH_REGISTER_REQUESTS_PER_MINUTE".into(),
+            "3".into()
+        )));
+        assert!(vars.contains(&(
+            "SYNAPSE_MCP_AUTH_ALLOWED_REDIRECT_URIS".into(),
+            "https://claude.ai/api/mcp/auth_callback".into()
+        )));
+        assert!(vars.contains(&(
+            "SYNAPSE_MCP_GOOGLE_CLIENT_SECRET".into(),
+            "client-secret".into()
+        )));
     }
 }

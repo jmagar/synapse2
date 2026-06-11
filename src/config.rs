@@ -1,18 +1,19 @@
 //! Configuration structs for the Example MCP server.
 //!
-//! Values are loaded in priority order (later sources override earlier ones):
-//!   1. `config.toml` — non-secret defaults (server config). Searched in the
-//!      service data dir (`/data` in Docker, `~/.synapse2` bare-metal) then the
-//!      current directory. See `config_search_dirs`.
-//!   2. `.env` — secrets, URLs, and runtime vars. Searched in the same dirs and
-//!      applied additively after `config.toml`.
-//!   3. Process environment variables (`SYNAPSE_MCP_*` / `SYNAPSE_API_*`) — the
-//!      final, highest-priority override.
+//! Values are loaded in priority order:
+//!   1. `config.toml` — non-secret defaults. Searched in the service data dir
+//!      (`/data` in Docker, `~/.synapse2` bare-metal) then the current directory.
+//!      First match wins.
+//!   2. `.env` — secrets, URLs, and runtime vars. Lower-priority `./.env` is
+//!      applied before appdata/SYNAPSE_HOME so explicit appdata values win.
+//!   3. Existing process environment variables — the final, highest-priority
+//!      override.
 //!
 //! Host topology is loaded separately in `host_config.rs` via
 //! `SYNAPSE_HOSTS_CONFIG` / `SYNAPSE_CONFIG_FILE` / `~/.ssh/config`.
 
 use serde::{Deserialize, Serialize};
+use std::collections::BTreeMap;
 
 const SERVICE_HOME_DIRNAME: &str = ".synapse2";
 
@@ -93,7 +94,6 @@ pub struct AuthConfig {
     pub google_client_id: Option<String>,
     pub google_client_secret: Option<String>,
     pub admin_email: String,
-    pub allowed_emails: Vec<String>,
     pub sqlite_path: String,
     pub key_path: String,
     pub access_token_ttl_secs: u64,
@@ -101,6 +101,7 @@ pub struct AuthConfig {
     pub auth_code_ttl_secs: u64,
     pub register_rpm: u32,
     pub authorize_rpm: u32,
+    pub disable_static_token_with_oauth: bool,
     pub allowed_client_redirect_uris: Vec<String>,
 }
 
@@ -172,7 +173,6 @@ impl Default for AuthConfig {
             google_client_id: None,
             google_client_secret: None,
             admin_email: String::new(),
-            allowed_emails: Vec::new(),
             sqlite_path: default_auth_sqlite_path(),
             key_path: default_auth_key_path(),
             access_token_ttl_secs: default_access_token_ttl_secs(),
@@ -180,6 +180,7 @@ impl Default for AuthConfig {
             auth_code_ttl_secs: default_auth_code_ttl_secs(),
             register_rpm: default_register_rpm(),
             authorize_rpm: default_authorize_rpm(),
+            disable_static_token_with_oauth: true,
             allowed_client_redirect_uris: Vec::new(),
         }
     }
@@ -240,7 +241,7 @@ impl Config {
             }
         }
 
-        for dir in config_search_dirs() {
+        for dir in dotenv_precedence_dirs() {
             apply_dotenv_file(&mut config, &dir.join(".env"))?;
         }
 
@@ -273,6 +274,39 @@ impl Config {
             "SYNAPSE_MCP_GOOGLE_CLIENT_SECRET",
             &mut config.mcp.auth.google_client_secret,
         );
+        env_str(
+            "SYNAPSE_MCP_AUTH_SQLITE_PATH",
+            &mut config.mcp.auth.sqlite_path,
+        );
+        env_str("SYNAPSE_MCP_AUTH_KEY_PATH", &mut config.mcp.auth.key_path);
+        env_parse(
+            "SYNAPSE_MCP_AUTH_ACCESS_TOKEN_TTL_SECS",
+            &mut config.mcp.auth.access_token_ttl_secs,
+        )?;
+        env_parse(
+            "SYNAPSE_MCP_AUTH_REFRESH_TOKEN_TTL_SECS",
+            &mut config.mcp.auth.refresh_token_ttl_secs,
+        )?;
+        env_parse(
+            "SYNAPSE_MCP_AUTH_CODE_TTL_SECS",
+            &mut config.mcp.auth.auth_code_ttl_secs,
+        )?;
+        env_parse(
+            "SYNAPSE_MCP_AUTH_REGISTER_REQUESTS_PER_MINUTE",
+            &mut config.mcp.auth.register_rpm,
+        )?;
+        env_parse(
+            "SYNAPSE_MCP_AUTH_AUTHORIZE_REQUESTS_PER_MINUTE",
+            &mut config.mcp.auth.authorize_rpm,
+        )?;
+        env_bool(
+            "SYNAPSE_MCP_AUTH_DISABLE_STATIC_TOKEN_WITH_OAUTH",
+            &mut config.mcp.auth.disable_static_token_with_oauth,
+        )?;
+        env_list(
+            "SYNAPSE_MCP_AUTH_ALLOWED_REDIRECT_URIS",
+            &mut config.mcp.auth.allowed_client_redirect_uris,
+        );
         if let Ok(v) = std::env::var("SYNAPSE_MCP_AUTH_MODE") {
             if !v.is_empty() {
                 config.mcp.auth.mode = match v.to_lowercase().as_str() {
@@ -292,6 +326,33 @@ impl Config {
     }
 }
 
+/// Seed process environment variables from configured `.env` files.
+///
+/// This supports settings read directly by libraries or early runtime setup
+/// (`RUST_LOG`, `NO_COLOR`, upstream API credentials, Docker Compose variables).
+/// Existing process environment variables always win. Among files, `./.env` is
+/// lower priority than appdata/SYNAPSE_HOME.
+pub fn load_dotenv_environment() -> anyhow::Result<()> {
+    let mut entries = BTreeMap::new();
+    for dir in dotenv_precedence_dirs() {
+        let path = dir.join(".env");
+        let contents = match std::fs::read_to_string(&path) {
+            Ok(contents) => contents,
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => continue,
+            Err(e) => return Err(anyhow::anyhow!("Failed to read {}: {e}", path.display())),
+        };
+        for (key, value) in parse_dotenv(&contents, &path)? {
+            entries.insert(key, value);
+        }
+    }
+    for (key, value) in entries {
+        if std::env::var_os(&key).is_none() {
+            std::env::set_var(key, value);
+        }
+    }
+    Ok(())
+}
+
 // ── env helpers ───────────────────────────────────────────────────────────────
 
 /// Directories searched for `config.toml` and `.env`, in priority order:
@@ -300,8 +361,8 @@ impl Config {
 ///      bind mount lands) or `~/.synapse2` on bare-metal (`default_data_dir`).
 ///   3. The current working directory — local dev / repo-root fallback.
 ///
-/// First match wins for `config.toml`; `.env` files are applied additively in
-/// the same order (later files override earlier keys).
+/// First match wins for `config.toml`. Use `dotenv_precedence_dirs` for `.env`
+/// loading so lower-priority files are applied first.
 fn config_search_dirs() -> Vec<std::path::PathBuf> {
     let mut dirs = Vec::new();
     if let Some(home) = std::env::var_os("SYNAPSE_HOME") {
@@ -310,6 +371,12 @@ fn config_search_dirs() -> Vec<std::path::PathBuf> {
         dirs.push(data_dir);
     }
     dirs.push(std::path::PathBuf::from("."));
+    dirs
+}
+
+fn dotenv_precedence_dirs() -> Vec<std::path::PathBuf> {
+    let mut dirs = config_search_dirs();
+    dirs.reverse();
     dirs
 }
 
@@ -409,6 +476,39 @@ fn apply_config_env_value(config: &mut Config, key: &str, value: &str) -> anyhow
         }
         "SYNAPSE_MCP_GOOGLE_CLIENT_SECRET" => {
             config.mcp.auth.google_client_secret = Some(value.to_string());
+        }
+        "SYNAPSE_MCP_AUTH_SQLITE_PATH" => config.mcp.auth.sqlite_path = value.to_string(),
+        "SYNAPSE_MCP_AUTH_KEY_PATH" => config.mcp.auth.key_path = value.to_string(),
+        "SYNAPSE_MCP_AUTH_ACCESS_TOKEN_TTL_SECS" => {
+            config.mcp.auth.access_token_ttl_secs = value
+                .parse()
+                .map_err(|_| anyhow::anyhow!("{key}: invalid value {value:?}"))?;
+        }
+        "SYNAPSE_MCP_AUTH_REFRESH_TOKEN_TTL_SECS" => {
+            config.mcp.auth.refresh_token_ttl_secs = value
+                .parse()
+                .map_err(|_| anyhow::anyhow!("{key}: invalid value {value:?}"))?;
+        }
+        "SYNAPSE_MCP_AUTH_CODE_TTL_SECS" => {
+            config.mcp.auth.auth_code_ttl_secs = value
+                .parse()
+                .map_err(|_| anyhow::anyhow!("{key}: invalid value {value:?}"))?;
+        }
+        "SYNAPSE_MCP_AUTH_REGISTER_REQUESTS_PER_MINUTE" => {
+            config.mcp.auth.register_rpm = value
+                .parse()
+                .map_err(|_| anyhow::anyhow!("{key}: invalid value {value:?}"))?;
+        }
+        "SYNAPSE_MCP_AUTH_AUTHORIZE_REQUESTS_PER_MINUTE" => {
+            config.mcp.auth.authorize_rpm = value
+                .parse()
+                .map_err(|_| anyhow::anyhow!("{key}: invalid value {value:?}"))?;
+        }
+        "SYNAPSE_MCP_AUTH_DISABLE_STATIC_TOKEN_WITH_OAUTH" => {
+            config.mcp.auth.disable_static_token_with_oauth = parse_bool_value(key, value)?;
+        }
+        "SYNAPSE_MCP_AUTH_ALLOWED_REDIRECT_URIS" => {
+            config.mcp.auth.allowed_client_redirect_uris = parse_list_value(value);
         }
         "SYNAPSE_MCP_AUTH_MODE" => {
             config.mcp.auth.mode = parse_auth_mode_value(value)?;

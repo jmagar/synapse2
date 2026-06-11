@@ -5,40 +5,31 @@
 #           Copy it to config.toml and adjust for your deployment.
 #
 #           config.toml holds non-secret defaults. Secrets and URLs go in .env.
-#           See .env.synapse2 for the secrets side of the split.
+#           See .env.example for the secrets side of the split.
 #
 # SPLIT PHILOSOPHY:
 #   config.toml → ports, bind addresses, feature flags, timeouts, rate limits,
-#                 log levels, retention settings, anything safe to commit
+#                 anything safe to commit
 #   .env        → API URLs, API keys, tokens, OAuth credentials, passwords,
-#                 anything that should NEVER be in version control
+#                 logging env vars, deploy/runtime vars, anything secret
 #
 # Environment variables ALWAYS take priority over config.toml values.
 # Naming:
 #   SYNAPSE_MCP_*  → [mcp] section  (server config)
-#   SYNAPSE_API_*  → [synapse2] section  (upstream service config)
+#   SYNAPSE_API_*  → upstream service process env
 #
 # TEMPLATE: Replace all "synapse2" / "EXAMPLE" references with your service name.
 # =============================================================================
 
 # ── Upstream service ──────────────────────────────────────────────────────────
-# TEMPLATE: This section wraps the remote service your MCP server talks to.
-#           Rename to match your service (e.g. [unraid], [gotify], [tailscale]).
-#           The section name must match the field name in Config in src/config.rs.
+# Upstream URLs and credentials are process env only. Set them in .env:
+#   SYNAPSE_API_URL=https://api.synapse2.com/v1
+#   SYNAPSE_API_KEY=...
 #
-# IMPORTANT: Do NOT put real credentials here. Use .env for api_url and api_key.
-#            These comments show the format; actual values come from env vars.
-[synapse2]
-# api_url = "https://api.synapse2.com/v1"
-# TEMPLATE: Set via SYNAPSE_API_URL env var. Full base URL of the remote API.
+# Full base URL examples:
 #   REST synapse2:    https://api.synapse2.com/v1
 #   GraphQL synapse2: https://graphql.synapse2.com/graphql
 #   Local synapse2:   http://192.168.1.100:8080
-
-# api_key = ""
-# TEMPLATE: Set via SYNAPSE_API_KEY env var. API key or bearer token.
-#   Generate in your service's developer console or admin panel.
-#   Never commit a real value here.
 
 # ── MCP HTTP server ───────────────────────────────────────────────────────────
 # TEMPLATE: Adjust host and port for your deployment.
@@ -128,52 +119,57 @@ mode = "bearer"
 
 # Bootstrap admin email — the first Google account allowed to authenticate.
 # SYNAPSE_MCP_AUTH_ADMIN_EMAIL env var overrides this.
-# TEMPLATE: Set to your Google account email. Additional accounts can be added
-#            via allowed_emails below or dynamically via the OAuth admin panel.
+# TEMPLATE: Set to your Google account email. Additional accounts are managed by
+#           the OAuth admin store after bootstrap.
 admin_email = ""
 
-# Additional allowed email addresses beyond admin_email.
-# TEMPLATE: Add your team members' Google email addresses here.
-allowed_emails = []
-
 # Path to the SQLite database for OAuth sessions and client registrations.
+# SYNAPSE_MCP_AUTH_SQLITE_PATH env var overrides this.
 # TEMPLATE: In Docker, /data is bind-mounted from ~/.synapse2 on the host.
 #           For bare-metal, change to ~/.synapse2/auth.db.
 sqlite_path = "/data/auth.db"
 
 # Path to the RS256 private key for JWT signing.
+# SYNAPSE_MCP_AUTH_KEY_PATH env var overrides this.
 # Auto-generated on first run if it doesn't exist.
 # TEMPLATE: In Docker, /data is bind-mounted from ~/.synapse2 on the host.
 #           For bare-metal, change to ~/.synapse2/auth-jwt.pem.
 key_path = "/data/auth-jwt.pem"
 
 # How long issued access tokens are valid (seconds).
+# SYNAPSE_MCP_AUTH_ACCESS_TOKEN_TTL_SECS env var overrides this.
 # TEMPLATE: 3600 (1 hour) is the standard. Reduce for higher security environments.
 access_token_ttl_secs = 3600
 
 # How long refresh tokens are valid (seconds).
+# SYNAPSE_MCP_AUTH_REFRESH_TOKEN_TTL_SECS env var overrides this.
 # TEMPLATE: 2592000 = 30 days. Increase for "remember me" UX; decrease for
 #            tighter security. Claude Desktop re-authenticates when this expires.
 refresh_token_ttl_secs = 2592000
 
 # How long OAuth authorization codes are valid (seconds).
+# SYNAPSE_MCP_AUTH_CODE_TTL_SECS env var overrides this.
 # TEMPLATE: 300 (5 minutes) is the OAuth spec default. Reduce to 60 for paranoid setups.
 auth_code_ttl_secs = 300
 
 # Rate limit: max new client registrations per minute per IP.
+# SYNAPSE_MCP_AUTH_REGISTER_REQUESTS_PER_MINUTE env var overrides this.
 # TEMPLATE: 10 is reasonable for a private server. Reduce to 1-3 for strict control.
 register_rpm = 10
 
 # Rate limit: max authorization attempts per minute per IP.
+# SYNAPSE_MCP_AUTH_AUTHORIZE_REQUESTS_PER_MINUTE env var overrides this.
 # TEMPLATE: 60 allows normal OAuth flows. Reduce if you see abuse.
 authorize_rpm = 60
 
 # When OAuth is active, disable the static bearer token (SYNAPSE_MCP_TOKEN).
+# SYNAPSE_MCP_AUTH_DISABLE_STATIC_TOKEN_WITH_OAUTH env var overrides this.
 # TEMPLATE: Set to false if you want both OAuth and static token active simultaneously.
 #           Useful during migration from bearer to OAuth.
 disable_static_token_with_oauth = true
 
 # Extra redirect URIs allowed during OAuth.
+# SYNAPSE_MCP_AUTH_ALLOWED_REDIRECT_URIS env var (comma-separated) overrides this.
 # claude.ai redirect URIs are included by default.
 # TEMPLATE: Add your MCP client's redirect URIs if they differ from claude.ai's.
 allowed_client_redirect_uris = []

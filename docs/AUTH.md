@@ -55,7 +55,7 @@ EXAMPLE_MCP_AUTH_ADMIN_EMAIL=you@example.com
 
 The server exposes standard OAuth discovery endpoints under `/mcp/.well-known/` that MCP clients can use for dynamic registration. Session cookies are disabled — all auth is via `Authorization` headers.
 
-OAuth and bearer token can coexist: set both `EXAMPLE_MCP_TOKEN` and the OAuth variables. To disable bearer tokens while OAuth is active, set `disable_static_token_with_oauth = true` under `[mcp.auth]` in `config.toml` (this is a config file field, not an environment variable).
+OAuth and bearer token can coexist: set both `EXAMPLE_MCP_TOKEN` and the OAuth variables. To disable bearer tokens while OAuth is active, set `disable_static_token_with_oauth = true` under `[mcp.auth]` in `config.toml` or set `EXAMPLE_MCP_AUTH_DISABLE_STATIC_TOKEN_WITH_OAUTH=true`.
 
 ---
 

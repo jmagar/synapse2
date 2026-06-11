@@ -41,8 +41,8 @@ services:
         required: false
     environment:
       SYNAPSE_MCP_HOST: 0.0.0.0
-      SYNAPSE_NOAUTH: "true"
       SYNAPSE_MCP_PORT: "40080"
+      SYNAPSE_MCP_TOKEN: "${SYNAPSE_MCP_TOKEN:?set SYNAPSE_MCP_TOKEN or configure OAuth explicitly}"
     ports:
       - "${SYNAPSE_MCP_HOST_PORT:-40080}:40080/tcp"
     volumes:
@@ -66,9 +66,9 @@ services:
     user: "1000:1000"
     # The docker socket is owned by root:docker on the host. Add that group so the
     # UID-1000 service can reach the daemon. Set DOCKER_GID to your host's docker
-    # group id:  getent group docker | cut -d: -f3   (999 is a common default).
+    # group id:  getent group docker | cut -d: -f3
     group_add:
-      - "${DOCKER_GID:-999}"
+      - "${DOCKER_GID:?set DOCKER_GID from: getent group docker | cut -d: -f3}"
     read_only: true
     tmpfs:
       - /tmp
