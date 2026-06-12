@@ -1,52 +1,57 @@
 # Phase 3: Testing and Documentation
 
-## Prior Phase Context
+Read first:
 
-Phase 1 found architecture concerns around `target_docker_hosts()` mixing target selection with live Docker daemon probes, JSON-shaped daemon ID extraction, and limited parser contract coverage. Phase 2 found a performance concern: all-host Docker reads were doing a serial daemon-ID preflight before normal fanout.
+- `.full-review/01-quality-architecture.md`
+- `.full-review/02-security-performance.md`
 
-## Testing Findings
+## Findings
 
-### Remediated During Integration
+- High — `apps/web/lib/template.test.ts:27`
+  The web metadata drift test fails: `REST_ACTIONS` is still `["greet", "echo", "status", "help"]`, while generated OpenAPI exposes `help`, `flux.docker.*`, `flux.container.list`, `scout.nodes`, `scout.peek`, and `scout.exec`.
+  Impact: the web app is known-broken under the current test suite. This is not a missing-test issue; it is a failing accepted contract test.
+  Fix: update `apps/web/lib/template.ts`, `apps/web/lib/api.ts`, and the dashboard/tool-runner pages to the Synapse2 REST contract, then rerun `cd apps/web && pnpm test`.
 
-- Medium - `src/flux_service.rs:118`
-  Original finding: there was no direct regression test for Docker host deduplication.
-  Remediation: `src/flux_service_tests.rs` now covers duplicate daemon IDs and the fallback contract that failed or missing daemon-ID discovery keeps the host. The implementation also uses `fanout` for daemon discovery instead of a serial loop.
+- High — `docs/AUTH.md:17`
+  Core auth documentation still uses `example:read`, `example:write`, `EXAMPLE_MCP_TOKEN`, `EXAMPLE_NOAUTH`, and `/v1/example`.
+  Impact: operators following the auth guide will configure wrong environment variables and reason about the wrong scope names.
+  Fix: rewrite `docs/AUTH.md` for `SYNAPSE_*`, `synapse:*`, `/v1/synapse2`, current bearer/OAuth behavior, and the static-token read-only limitation.
 
-- Medium - `src/flux_service/docker.rs:412`
-  Original finding: the new `docker build` execution path was not directly covered by a mock `HostExec` test.
-  Remediation: `src/flux_service/docker_tests.rs` now records `HostExec` calls and asserts `docker build` argv construction, `--no-cache`, Dockerfile path construction, host tagging, success mapping, and stdout propagation.
+- High — `install.sh:27`
+  The installer is still a template stub: `REPO="your-org/example-mcp"`, `BINARY_NAME="example"`, `SERVICE_NAME="example-mcp"`, and `EXAMPLE_MCP_*` override variables.
+  Impact: published install instructions or copied installer use would install the wrong binary/service name and fail to fetch Synapse2 release assets.
+  Fix: either remove the installer until it is supported or adapt it fully to `jmagar/synapse2`, `synapse`, `synapse2`, and `SYNAPSE_*`.
 
-- Low - `src/cli/flux.rs:70` and `tests/cli_parse.rs:117`
-  Original finding: parser coverage only covered the reported `--command sh -c ...` case.
-  Remediation: `tests/cli_parse.rs` now covers double-dash command argv, Synapse options before `--command`, and the intentional rule that option-looking tokens after `--command` remain container argv.
+- Medium — `docs/ARCHITECTURE.md:18`
+  Architecture docs still describe `rmcp-template`, `ExampleClient`, `ExampleService`, `/v1/example`, and `example:*` scopes, despite current code having `SynapseService`, `FluxService`, `ScoutService`, and `/v1/synapse2`.
+  Impact: contributor onboarding points at obsolete module names and the old one-tool template architecture rather than the two-tool Synapse2 shape.
+  Fix: rewrite the architecture guide around `FluxService`/`ScoutService`, typed `SynapseAction`, two MCP tools, REST dotted actions, and current auth policy states.
 
-## Documentation Findings
+- Medium — `docs/DOCKER.md:41`, `docs/SYSTEMD.md:16`, `docs/ENV.md:18`, `docs/JUSTFILE.md:22`
+  Multiple operational docs are still template-oriented (`example`, `EXAMPLE_*`, `~/.example`, `example-mcp.service`, `target/release/example`).
+  Impact: deployment and runtime troubleshooting docs disagree with the shipped binary and configuration.
+  Fix: refresh the operational docs in one pass and add a docs grep/invariant test for forbidden template identifiers outside intentional historical/session docs and scaffold examples.
 
-### Remediated During Integration
+- Medium — `tests/tool_dispatch.rs:11`
+  Direct MCP dispatch coverage is thin. `cargo xtask patterns` warns that `container`, `compose`, `peek`, `find`, `df`, `delta`, `emit`, `beam`, `zfs`, and `logs` may be missing action coverage.
+  Impact: schema/parser/service parity regressions can survive until broader tests or live smoke tests run.
+  Fix: add table-driven MCP dispatch tests for every action family and document explicit exceptions for actions that require live resources or destructive confirmation.
 
-- Medium - `plugins/synapse2/skills/synapse2/SKILL.md:95`
-  Original finding: the skill broadly warned against `sh -c`, contradicting valid `container exec` argv usage and the destructive smoke route.
-  Remediation: the gotcha now distinguishes `container exec` literal argv from `scout exec` host commands, keeping the no-shell warning scoped to `scout exec`.
+- Medium — `.github/workflows/release.yml:29`, `.github/workflows/docker-publish.yml:28`
+  There is no invariant test that compares workflow release names and Docker image refs to the crate binary and repository identity.
+  Impact: stale workflow identities survived normal checks and would break release/publish later.
+  Fix: extend `tests/template_invariants.rs` or `cargo xtask patterns` to reject stale `BINARY_NAME: example`, `example-mcp`, and mismatched package references in active workflow files.
 
-- Low - `docs/CLI_DESTRUCTIVE_SMOKE.md:151`
-  Original finding: the historical findings section described the parser bug without saying it had been fixed.
-  Remediation: the smoke doc now includes a current-status note after the historical parser finding.
+## Verification Notes
 
-## Positive Notes
+- `cargo test --locked` passed.
+- `python3 scripts/check-openapi.py --check` passed.
+- `python3 scripts/check-schema-docs.py --check` passed.
+- `cargo xtask patterns` passed hard checks but emitted test coverage and module cohesion warnings.
+- `cd apps/web && pnpm test` failed in `apps/web/lib/template.test.ts`.
 
-- `tests/cli_parse.rs` now covers the original parser regression plus option ordering and command-argv edge cases.
-- `src/flux_service/docker_tests.rs` uses a focused `HostExec` recording test instead of requiring a live Docker daemon.
-- `docs/CLI_DESTRUCTIVE_SMOKE.md` correctly frames destructive smoke testing as local operator validation, not CI, and warns that Docker prune APIs are not label-scoped.
+## Documentation Strengths
 
-## Verification
-
-- `git diff --check` - passed during the review lane.
-- `cargo test --test cli_parse` - passed during the review lane.
-- `cargo test flux_service::docker::tests` - passed during the review lane.
-- `cargo test flux_service::tests` - passed during the review lane.
-- `cargo fmt --check` - passed during the review lane.
-- `cargo clippy -- -D warnings` - passed during the review lane.
-
-## Critical Issues for Phase 4 Context
-
-- The originally missing daemon-dedupe, build-exec, parser-contract, and documentation fixes were addressed during integration. Remaining risk is live Docker/SSH behavior, which was not exercised by this review.
+- `docs/API.md` and `docs/MCP_SCHEMA.md` are substantially aligned with current `flux` and `scout` behavior.
+- Generated OpenAPI is current according to `scripts/check-openapi.py --check`.
+- Session logs document recent remediation work and can help reconstruct why the current shape exists, though they should not substitute for active docs.

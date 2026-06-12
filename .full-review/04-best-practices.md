@@ -1,51 +1,53 @@
 # Phase 4: Best Practices and Standards
 
-## Prior Phase Context
+Read first:
 
-Phases 1-3 found no critical issues. The main recurring concern was boundary behavior: all-host Docker reads perform daemon-ID discovery, and `docker build` runs through the host execution seam. The integration pass moved daemon-ID extraction into a typed helper, made discovery concurrent through `fanout`, and added mock-backed tests for the boundary behavior.
+- `.full-review/00-scope.md`
+- `.full-review/01-quality-architecture.md`
+- `.full-review/02-security-performance.md`
+- `.full-review/03-testing-documentation.md`
 
 ## Findings
 
-### Remediated During Integration
+- High — `.github/workflows/release.yml:29`
+  Release automation violates the repo's own packaging convention by using a stale template binary name. This is a standards/operations issue in addition to a quality issue.
+  Impact: tag-driven release readiness cannot be trusted.
+  Fix: wire workflow values to current crate metadata or add an invariant checker that fails before merge.
 
-- Medium - `src/flux_service.rs:118`
-  Original finding: `target_docker_hosts()` reached directly into `DockerClientCache`, called live `docker info`, and consumed presentation-shaped JSON inline.
-  Remediation: daemon discovery now uses typed `docker::daemon_id()` over the existing `SystemOps` trait, discovery runs through `fanout`, and dedupe policy is covered by unit tests.
+- High — `.github/workflows/docker-publish.yml:28`
+  Docker image naming is not synchronized with repository identity. The workflow would publish under `example-mcp` and then scan that stale image.
+  Impact: downstream consumers and security tooling may observe a green workflow for the wrong artifact.
+  Fix: use a Synapse2 image ref and enforce this with a static workflow contract check.
 
-- Low - `src/flux_service.rs:127`
-  Original finding: discovery errors were intentionally swallowed, but the fallback contract was not covered by tests.
-  Remediation: `src/flux_service_tests.rs` now verifies that failed or missing daemon-ID discovery keeps the host rather than deduping it away.
+- High — `apps/web/package.json:2`
+  The web package is still named `rmcp-template-web`, and active web code/docs use template env/action names.
+  Impact: package metadata, web tests, and app behavior all indicate the web app was not fully adapted as a Synapse2 surface.
+  Fix: rename the package and public config to Synapse2, and consider deriving action metadata from OpenAPI instead of duplicating it.
 
-- Low - `plugins/synapse2/skills/synapse2/SKILL.md:3`
-  Original finding: the plugin skill frontmatter description was long and mixed trigger phrases with operational instruction.
-  Remediation: the frontmatter is now concise trigger-oriented metadata, and the direct SSH/Docker fallback guidance lives in the Tier 1 body with the existing critical gotchas.
+- Medium — `docs/` active guides
+  Active documentation frontmatter frequently retains `owner: "rmcp-template"` and `scope: "template"` even in a derived Synapse2 repo.
+  Impact: contributors cannot tell which docs are normative for Synapse2 versus inherited template reference material.
+  Fix: classify active docs as `service` or move generic template docs into a clearly labeled reference section.
 
-## Standards Checks
+- Medium — `src/mcp/rmcp_server.rs:121`
+  `validate_response_format_arg` lives in the protocol server file. `cargo xtask patterns` flags this as suspicious surface logic.
+  Impact: the helper is currently protocol glue, not business logic, but this file already handles auth, parsing errors, rendering, and tool result construction; more validation here would erode the thin-boundary rule.
+  Fix: keep this helper minimal or move response-format validation into the shared action parsing layer so MCP/REST/CLI semantics stay unified.
 
-- Rust style: `cargo fmt --check` passed during the review lane.
-- Rust linting: `cargo clippy -- -D warnings` passed during the review lane.
-- Live-safe validation: read-only `target/debug/synapse flux docker ...` commands validated local and all-host Docker reads without destructive smoke operations.
-- Shim boundary: the CLI parser remains a thin parser and delegates business behavior to `FluxService`; no business logic was added to the CLI beyond argument partitioning.
-- Execution safety: `docker build` still constructs argv without shell concatenation and now uses the established `HostExec` seam.
-- Destructive operation standard: destructive smoke documentation explicitly avoids CI and highlights non-label-scoped prune behavior.
-- Plugin manifest standard: no plugin manifest `version` field was added in the reviewed diff.
+- Medium — `apps/web/package.json:21`
+  pnpm warns that the `"pnpm"` field is no longer read, so the `next>postcss` override is ignored.
+  Impact: dependency hygiene controls are not applied as intended.
+  Fix: move overrides to a supported `pnpm-workspace.yaml` or current pnpm configuration location.
 
-## Positive Notes
+- Low — `src/scout_service/fs.rs:52`
+  `peek` lacks a streaming/bounded-read API despite the project having runtime response caps.
+  Impact: bounded output is good, but bounded IO is a better performance and reliability standard for infrastructure file viewers.
+  Fix: use streaming reads and remote byte caps.
 
-- Moving `docker build` through `HostExec` aligns it with compose and host command execution patterns.
-- The parser helper is documented in code and localized to the container CLI parsing path.
-- The destructive smoke document sets an appropriate operational boundary by separating local validation from CI automation and now clarifies that the historical `container exec` parser bug is fixed.
+## Standards Strengths
 
-## Verification
-
-- `git diff --check` - passed during the review lane.
-- `cargo fmt --check` - passed during the review lane.
-- `cargo clippy -- -D warnings` - passed during the review lane.
-- `cargo test --test cli_parse` - passed during the review lane.
-- `cargo test flux_service::docker::tests` - passed during the review lane.
-- `cargo test flux_service::tests` - passed during the review lane.
-- `cargo build --quiet` - passed during live-safe validation.
-- `target/debug/synapse flux docker info --host local --response-format json` - passed in about 0.01s.
-- `target/debug/synapse flux docker info --response-format json` - passed in about 3.10s; `local` was deduped against `dookie`, and Docker-unavailable hosts were returned as partial errors.
-- `target/debug/synapse flux docker images --response-format json` - passed in about 7.50s.
-- `target/debug/synapse flux container list --response-format json` - passed in about 7.61s.
+- `mod.rs` is absent, matching the repo convention.
+- Plugin manifests omit explicit `version` fields.
+- Rust test coverage is broad and currently passing.
+- The server has explicit auth policy states rather than boolean soup.
+- Destructive operations have a service-layer confirmation abstraction shared across surfaces.

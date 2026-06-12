@@ -2,133 +2,128 @@
 
 ## Review Target
 
-Current uncommitted diff in `/home/jmagar/workspace/synapse2` on `main`, based on `59514f8 chore: remove scaffold-project skill; add ZFS triggers to description`.
-
-Reviewed files:
-
-- `plugins/synapse2/skills/synapse2/SKILL.md`
-- `src/cli/flux.rs`
-- `src/flux_service.rs`
-- `src/flux_service/container_driver.rs`
-- `src/flux_service/docker.rs`
-- `src/flux_service/docker_driver.rs`
-- `src/flux_service/docker_tests.rs`
-- `src/flux_service_tests.rs`
-- `tests/cli_parse.rs`
-- `docs/CLI_DESTRUCTIVE_SMOKE.md`
+Full repository review of `/home/jmagar/workspace/synapse2` at `main` commit `f2dcd16` (`docs: save session log`), covering Rust server code, MCP/REST/CLI surfaces, web UI, docs, tests, workflows, scripts, and plugin packaging.
 
 ## Executive Summary
 
-No critical security or correctness issues were found in the scoped diff. Initial review found risk in the new all-host Docker dedupe path because it performed serial daemon discovery and lacked direct regression coverage; the integration pass changed discovery to use concurrent `fanout`, added a typed daemon-ID helper, and added focused tests for dedupe, fallback, parser, and build-exec behavior.
-
-The parser fix for `container exec --command sh -c ...` is sound and now tested beyond the reported case. The remote `docker build` direction matches existing execution seams and has mock-backed coverage for argv construction and result mapping. Read-only live validation with the current `target/debug/synapse` binary confirmed local and all-host Docker reads behave as expected, including deduping `local` when it points at the same daemon as `dookie`.
+Synapse2's Rust core is in comparatively good shape: service boundaries are clean, destructive operations are gated, parsed scope checks are present, and `cargo test --locked` passes. The major risk is adaptation drift: the web UI, release/Docker workflows, installer, and several active docs still describe or operate on the old `example`/`rmcp-template` contract, and the web test suite is currently red because of that drift.
 
 ## Findings by Priority
 
 ### Critical Issues
 
-- None.
+- None found in the reviewed phases.
 
 ### High Priority
 
-- None.
+- High — Phase 1/3/4 — `apps/web/lib/template.ts:1`, `apps/web/lib/api.ts:68`, `apps/web/app/page.tsx:49`
+  The embedded web UI still targets template actions and `/v1/example`. The current web tests fail because the web action metadata disagrees with generated OpenAPI.
+  Fix by replacing the web action model and dashboard/tool-runner calls with Synapse2 `flux`/`scout` REST metadata.
+
+- High — Phase 1/2/4 — `.github/workflows/release.yml:29`
+  Release automation packages `example` instead of the real `synapse` binary.
+  Fix by setting `BINARY_NAME=synapse` and adding a workflow invariant check against `Cargo.toml`.
+
+- High — Phase 1/2/4 — `.github/workflows/docker-publish.yml:28`
+  Docker publishing and Trivy scanning target `ghcr.io/jmagar/example-mcp`.
+  Fix by using the Synapse2 image identity and rejecting stale template refs in workflow checks.
+
+- High — Phase 3 — `docs/AUTH.md:17`
+  Auth docs still use `example:*`, `EXAMPLE_*`, and `/v1/example`.
+  Fix by rewriting the auth guide around `synapse:*`, `SYNAPSE_*`, `/v1/synapse2`, and the current bearer/OAuth behavior.
+
+- High — Phase 3 — `install.sh:27`
+  Installer metadata still points to `your-org/example-mcp`, `example`, and `EXAMPLE_MCP_*`.
+  Fix by adapting it to Synapse2 or removing it until supported.
 
 ### Medium Priority
 
-- Remediated - Phase 2 / Performance - `src/flux_service.rs:126`
-  Original issue: all-host Docker reads serially probed each configured host with `docker info` before fanout.
-  Resolution: daemon discovery now uses the existing `fanout` helper, so probes run concurrently and preserve the normal partial-failure shape.
+- Medium — Phase 1 — `src/scout.rs:1`
+  Stale MVP `peek` and `exec` helpers remain beside the active `ScoutService` implementation.
+  Fix by reducing the module to host helpers or moving the helpers and deleting stale functions.
 
-- Remediated - Phase 1 / Architecture - `src/flux_service.rs:118`
-  Original issue: daemon discovery was embedded inline and coupled to JSON output.
-  Resolution: daemon ID extraction now lives in typed `docker::daemon_id()` over `SystemOps`, and dedupe policy is isolated in tested helpers.
+- Medium — Phase 1/4 — `src/actions/flux.rs:1`, `src/cli/flux.rs:1`, `src/cli/help.rs:1`, `src/config.rs:1`, `src/mcp/help.rs:1`
+  Several modules exceed the advisory size budget.
+  Fix opportunistically with cohesive submodules.
 
-- Remediated - Phase 3 / Testing - `src/flux_service.rs:118`
-  Original issue: no direct daemon-dedupe tests.
-  Resolution: `src/flux_service_tests.rs` covers duplicate daemon IDs and keeps hosts when daemon discovery fails or returns `None`.
+- Medium — Phase 1/3 — `tests/tool_dispatch.rs:11`
+  Direct MCP dispatch coverage does not cover many action families.
+  Fix with table-driven action-family dispatch tests.
 
-- Remediated - Phase 3 / Testing - `src/flux_service/docker.rs:412`
-  Original issue: no direct mock coverage for `docker build` through `HostExec`.
-  Resolution: `src/flux_service/docker_tests.rs` now records the `HostExec` call and asserts program, argv, host tagging, success, and stdout mapping.
+- Medium — Phase 2 — `src/server.rs:165`
+  Static bearer tokens are read-scoped only with no visible write-scoped bearer path.
+  Fix by documenting this explicitly or adding separate read/write bearer token configuration.
 
-- Remediated - Phase 3 / Documentation - `plugins/synapse2/skills/synapse2/SKILL.md:95`
-  Original issue: the skill broadly discouraged `sh -c`, contradicting valid `container exec` argv use.
-  Resolution: the skill now scopes the no-shell warning to `scout exec` and documents that `container exec` passes literal argv.
+- Medium — Phase 3 — `docs/ARCHITECTURE.md:18`, `docs/DOCKER.md:41`, `docs/SYSTEMD.md:16`, `docs/ENV.md:18`
+  Active docs retain template identifiers and examples.
+  Fix by refreshing docs and adding a forbidden-template-identifier docs check.
+
+- Medium — Phase 4 — `src/mcp/rmcp_server.rs:121`
+  Response-format validation sits in the protocol server file.
+  Fix by keeping it minimal or centralizing validation with shared action parsing.
+
+- Medium — Phase 4 — `apps/web/package.json:21`
+  pnpm ignores the current `"pnpm"` override field.
+  Fix by moving overrides to supported pnpm configuration.
 
 ### Low Priority
 
-- Remediated - Phase 1 / Architecture - `src/flux_service.rs:129`
-  Original issue: daemon ID extraction depended on `serde_json::Value` pointer `/info/ID`.
-  Resolution: `docker::daemon_id()` now reads typed `SystemInfo.id`.
+- Low — Phase 2/4 — `src/scout_service/fs.rs:52`
+  `peek` reads whole allowed files before response truncation.
+  Fix with bounded/streaming file reads and remote byte caps.
 
-- Remediated - Phase 1 / Testing - `src/cli/flux.rs:70`
-  Original issue: parser coverage did not include options before `--command` or flag-like argv after it.
-  Resolution: `tests/cli_parse.rs` now covers those cases.
-
-- Remediated - Phase 3 / Documentation - `docs/CLI_DESTRUCTIVE_SMOKE.md:151`
-  Original issue: the historical findings section described the parser bug without a current-status note.
-  Resolution: the smoke doc now states the parser behavior is fixed.
-
-- Remediated - Phase 4 / Standards - `src/flux_service.rs:127`
-  Original issue: daemon discovery fallback behavior was not explicit enough.
-  Resolution: unit tests now lock the "unknown daemon ID keeps the host" contract.
-
-- Remediated - Phase 4 / Standards - `plugins/synapse2/skills/synapse2/SKILL.md:3`
-  Original issue: the skill frontmatter description was long and mixed trigger phrases with operational instruction.
-  Resolution: the frontmatter is now concise trigger-oriented metadata, with direct SSH/Docker fallback guidance moved into the Tier 1 body.
+- Low — Phase 2 — `src/scout_service/exec.rs:139`
+  `emit` accepts target paths but ignores them during fanout execution.
+  Fix by rejecting path for unsupported modes or applying/documenting cwd behavior consistently.
 
 ## Findings by Category
 
 ### Architecture and Code Quality
 
-The CLI parser fix is localized and keeps business behavior out of the shim. The initial architecture concern around `target_docker_hosts()` was reduced by typed daemon discovery, concurrent fanout, and unit tests for dedupe policy. It still performs Docker I/O as part of target preparation, but that behavior is explicit and covered for the intended fallback semantics.
+The service-layer split into `FluxService` and `ScoutService` is strong, and MCP/CLI shims mostly remain thin. Current architecture debt is concentrated in stale template/web surfaces, leftover MVP Scout helpers, and several coordination-heavy modules that are over the soft budget.
 
 ### Security
 
-No direct vulnerabilities were found. The parser treats post-`--command` tokens as literal argv and does not introduce shell interpolation. `docker build` constructs argv without shell concatenation, and build context validation remains in place.
+Core auth and destructive-operation controls are meaningfully stronger than the surrounding docs suggest. The main security risk is operational: stale Docker/release identities and incorrect auth docs can lead users to trust or configure the wrong artifacts and scopes.
 
 ### Performance
 
-The serial daemon-ID preflight concern was remediated by running daemon discovery through `fanout`. Read-only live validation found all-host `docker info` completing in about 3.10s, `docker images` in about 7.50s, and `container list` in about 7.61s with partial errors limited to Docker-unavailable hosts. A short-TTL daemon-ID cache was considered and intentionally skipped because the current fanout behavior is acceptable and a cache would mainly help repeated calls in a long-lived server process.
+No broad runtime performance defect was found. The main concrete performance issue is `peek` reading full allowed files before truncation.
 
 ### Testing
 
-Targeted parser coverage exists and passes. The integration pass added coverage for daemon dedupe semantics and the `HostExec` docker build handoff.
+Rust coverage is broad and currently green. Web tests are red and accurately catch stale metadata. Direct MCP dispatch coverage should be broadened so action-family drift is caught earlier.
 
 ### Documentation
 
-The destructive smoke route is useful and appropriately warns that prune is broad and not label-scoped. The skill gotcha around `sh -c` was scoped so it does not contradict valid container exec usage and the smoke route.
+`docs/API.md` and `docs/MCP_SCHEMA.md` are current enough to be useful. Several other active docs still read like template docs and should be refreshed or clearly marked as inherited template reference.
 
 ### Standards and Operations
 
-`cargo fmt --check`, `cargo clippy -- -D warnings`, `git diff --check`, and targeted tests passed during review-lane verification. The destructive smoke route is correctly documented as local operator validation rather than CI.
+Hard repo gates pass, but release and Docker publish workflows do not meet the operational standard expected for a deployable repo because they target stale artifact identities.
 
 ## Recommended Fix Order
 
-1. Optionally run the destructive smoke route from `docs/CLI_DESTRUCTIVE_SMOKE.md` when operationally safe.
-2. Reconsider a short-TTL daemon-ID cache only if repeated all-host reads in the long-lived server process show measurable daemon-discovery overhead.
-
-## Verification
-
-- `git diff --check` - passed during the review lane.
-- `cargo test --test cli_parse` - passed during the review lane before integration updates.
-- `cargo test flux_service::docker::tests` - passed during the review lane before integration updates.
-- `cargo test flux_service::tests` - passed during the review lane before integration updates.
-- `cargo fmt --check` - passed during the review lane.
-- `cargo clippy -- -D warnings` - passed during the review lane.
-- `cargo build --quiet` - passed during live-safe validation.
-- `target/debug/synapse flux docker info --host local --response-format json` - passed in about 0.01s; one local daemon result.
-- `target/debug/synapse flux docker df --host local --response-format json` - passed in about 7.64s; one local daemon result.
-- `target/debug/synapse flux docker images --host local --response-format json` - passed in about 0.09s; 21 local images.
-- `target/debug/synapse flux container list --host local --response-format json` - passed in about 0.12s; 21 local containers.
-- `target/debug/synapse flux docker info --response-format json` - passed in about 3.10s; 6 successful daemon hosts, `local` deduped against `dookie`, and Docker-unavailable hosts reported as partial errors.
-- `target/debug/synapse flux docker images --response-format json` - passed in about 7.50s; 161 images across successful hosts.
-- `target/debug/synapse flux container list --response-format json` - passed in about 7.61s; 118 containers across successful hosts.
-- `target/debug/synapse flux docker df --response-format json` - passed in about 39.43s; heavy Docker disk-usage path with the same Docker-unavailable partial errors.
-
-No destructive smoke commands were run.
+1. Fix the web contract drift and restore `cd apps/web && pnpm test`.
+2. Fix release and Docker workflow artifact/image identities, then add static invariant tests for both.
+3. Refresh auth/deployment docs and either adapt or remove `install.sh`.
+4. Add direct MCP dispatch tests for missing action families.
+5. Clarify static bearer write-scope policy.
+6. Remove stale `src/scout.rs` MVP helpers.
+7. Address bounded `peek` reads and `emit` path semantics.
+8. Opportunistically split modules over the advisory size budget.
 
 ## Residual Risks
 
-- The review did not execute destructive smoke flows.
-- Docker disk-usage reads can still be slow because `docker df` itself is heavy on the current inventory; this is not evidence of serial daemon discovery.
+- I did not run live destructive Docker/Compose/SSH actions; review relied on code, unit/integration tests, and safe checks.
+- I did not run a full release workflow or Docker publish dry-run; workflow findings are static but direct.
+- Stale template text is widespread in historical session logs and generic template references; remediation should avoid rewriting archived history and focus on active operator docs.
+
+## Commands Run
+
+- `cargo test --locked` — passed.
+- `cd apps/web && pnpm test` — failed in `apps/web/lib/template.test.ts`.
+- `python3 scripts/check-openapi.py --check` — passed.
+- `python3 scripts/check-schema-docs.py --check` — passed.
+- `cargo xtask patterns` — passed hard checks with warnings.
+- `scripts/check-rust-module-size.sh` — passed hard gate with advisory warnings.
