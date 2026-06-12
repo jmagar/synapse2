@@ -221,37 +221,37 @@ positional argument, action the second, and subaction the third.
 
 ```bash
 # flux docker
-synapse2 flux docker info
-synapse2 flux docker images
-synapse2 flux docker pull --host myhost --image nginx:latest
+synapse flux docker info
+synapse flux docker images
+synapse flux docker pull --host myhost --image nginx:latest
 
 # flux container
-synapse2 flux container list
-synapse2 flux container list --state running
-synapse2 flux container logs --container-id abc123 --lines 100
-synapse2 flux container exec --container-id abc123 -- ls -la /var/log
+synapse flux container list
+synapse flux container list --state running
+synapse flux container logs --container-id abc123 --lines 100
+synapse flux container exec --container-id abc123 -- ls -la /var/log
 
 # flux host
-synapse2 flux host status
-synapse2 flux host resources
-synapse2 flux host services --host myhost
+synapse flux host status
+synapse flux host resources
+synapse flux host services --host myhost
 
 # flux compose
-synapse2 flux compose list --host myhost
-synapse2 flux compose status --host myhost --project mystack
+synapse flux compose list --host myhost
+synapse flux compose status --host myhost --project mystack
 
 # scout simple
-synapse2 scout nodes
-synapse2 scout peek --host myhost --path /etc/nginx/nginx.conf
-synapse2 scout exec --host myhost --command hostname
+synapse scout nodes
+synapse scout peek --host myhost --path /etc/nginx/nginx.conf
+synapse scout exec --host myhost --command hostname
 
 # scout zfs
-synapse2 scout zfs pools --host myhost
-synapse2 scout zfs datasets --host myhost --pool tank
+synapse scout zfs pools --host myhost
+synapse scout zfs datasets --host myhost --pool tank
 
 # scout logs
-synapse2 scout logs syslog --host myhost
-synapse2 scout logs journal --host myhost --unit docker --priority err
+synapse scout logs syslog --host myhost
+synapse scout logs journal --host myhost --unit docker --priority err
 ```
 
 ---
@@ -262,8 +262,8 @@ synapse2 scout logs journal --host myhost --unit docker --priority err
 
 ```json
 {
-  "action": "docker",
-  "params": {"subaction": "info"}
+  "action": "flux.docker.info",
+  "params": {}
 }
 ```
 

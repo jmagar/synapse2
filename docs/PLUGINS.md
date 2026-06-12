@@ -272,7 +272,7 @@ Synapse2 has write-capable `flux` and `scout` actions guarded by confirmation. K
 When updating the Synapse2 plugin:
 
 1. Update all three manifests with the current repository, description, author, keywords, and capability claims.
-3. Keep credential names aligned across Claude `userConfig`, Codex shared `.mcp.json`, and Gemini `settings`.
+3. Keep credential names aligned across Claude `userConfig`, Codex shared `mcp.json`, and Gemini `settings`.
 4. Update `plugins/synapse2/hooks/plugin-setup.sh` to map service-specific plugin options into env vars.
 5. Keep `synapse setup plugin-hook`, `--no-repair`, `check`, and `repair` working.
 7. Update shared skill docs for the actual action surface.

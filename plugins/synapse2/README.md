@@ -12,9 +12,9 @@ plugins/synapse2/
 │   ├── plugin.json         # Codex manifest
 │   └── README.md           # Codex manifest field reference
 ├── gemini-extension.json   # Gemini CLI extension manifest
-├── .mcp.json               # Shared MCP server connection config (all three platforms)
+├── mcp.json                # Shared MCP server connection config (Claude/Codex)
 ├── bin/
-│   └── synapse2             # Release binary (populate with: just install)
+│   └── synapse             # Release binary (populate with: just install)
 ├── hooks/
 │   ├── hooks.json          # SessionStart + ConfigChange hook definitions
 │   └── plugin-setup.sh     # Deployment and validation script
@@ -27,19 +27,19 @@ plugins/synapse2/
 
 ## Platform manifests
 
-Claude Code and Codex read their MCP connection config from the shared `.mcp.json`. Gemini CLI embeds its `mcpServers` config inline in `gemini-extension.json` (its own format). All three share the same `skills/` directory.
+Claude Code and Codex read their MCP connection config from the shared `mcp.json`. Gemini CLI embeds its `mcpServers` config inline in `gemini-extension.json` (its own format). All three share the same `skills/` directory.
 
 | File | Platform | MCP config | Variable syntax |
 |---|---|---|---|
-| `.claude-plugin/plugin.json` | Claude Code | `.mcp.json` | `${user_config.*}` |
-| `.codex-plugin/plugin.json` | Codex | `.mcp.json` | `${user_config.*}` |
+| `.claude-plugin/plugin.json` | Claude Code | `mcp.json` | `${user_config.*}` |
+| `.codex-plugin/plugin.json` | Codex | `mcp.json` | `${user_config.*}` |
 | `gemini-extension.json` | Gemini CLI | inline `mcpServers` | `${settings.*}` |
 
 **No `version` field in any manifest.** The marketplace assigns version from the git commit SHA. Adding an explicit version creates duplicate entries on every push.
 
 ## MCP connection
 
-`.mcp.json` is shared across all platforms:
+`mcp.json` is shared by Claude Code and Codex:
 
 ```json
 {

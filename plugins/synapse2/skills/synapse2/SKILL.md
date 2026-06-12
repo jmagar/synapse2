@@ -1,6 +1,6 @@
 ---
 name: synapse2
-description: "Use for Synapse flux/scout Docker, Compose, SSH, logs, files, ZFS, host diagnostics, and remote allowlisted commands."
+description: "Use when the user needs to inspect or manage Synapse2-managed Docker/Compose infrastructure via flux, or SSH/local host files, processes, logs, ZFS, and allowlisted commands via scout. Prefer MCP tools first, CLI second, REST last; use write or confirmation-gated actions only when explicitly requested or necessary."
 ---
 
 # synapse2
@@ -8,9 +8,8 @@ description: "Use for Synapse flux/scout Docker, Compose, SSH, logs, files, ZFS,
 <!-- TIER 1: Quick-reference table and critical gotchas -->
 
 Two MCP tools: **`flux`** for Docker/host inspection, **`scout`** for SSH/local
-host operations. All read-only ops use `synapse:read`; destructive ops
-(`stop`, `exec`, `rmi`, `prune`, compose `down/restart/recreate`, `emit`,
-`beam`) require `synapse:write` and go through a confirmation gate.
+host operations. Start with read-only inspection. Use write-scope or
+confirmation-gated actions only when explicitly requested or clearly necessary.
 
 Use these tools before falling back to direct SSH or Docker API calls.
 
@@ -79,6 +78,10 @@ Use these tools before falling back to direct SSH or Docker API calls.
 | `scout` | `logs`, `auth` | `host`, `lines?`, `grep?` | Read auth log |
 | `scout` | `help` | `topic?`, `format?` | Scout documentation |
 
+For the full parameter table, use `references/action-reference.md` in this skill
+package or the live MCP help topics (`flux(action="help")`,
+`scout(action="help")`).
+
 ## Critical Gotchas
 
 - **Read ops fan out** across all configured hosts when `host` is omitted;
@@ -94,290 +97,142 @@ Use these tools before falling back to direct SSH or Docker API calls.
 - **For `scout exec`, never pass shell metacharacters** (`|`, `>`, `&&`, `..`);
   host command execution is execvp-style and does not run through `sh -c`.
 - **Destructive ops need confirmation** via the MCP elicitation gate; declining
-  returns an error without performing any IO.
+  returns an error without performing any IO. `SYNAPSE_MCP_ALLOW_DESTRUCTIVE`
+  defaults to false. If enabled on a non-loopback bind, startup refuses to run.
 - **Responses are token-budgeted** — very long log tails or large directory
   trees may be truncated. Use `lines`/`limit`/`depth` params to control size.
 
----
+## Safety Matrix
 
-<!-- TIER 2: Full action reference with parameters and response shapes -->
+| Action family | Write scope | Confirmation gated | Operator risk |
+|---|---:|---:|---|
+| `flux docker info/df/images/networks/volumes` | no | no | Read-only Docker inventory. |
+| `flux docker pull` | yes | no | Downloads an image; can consume bandwidth/disk. |
+| `flux docker build/rmi/prune` | yes | yes | Builds, removes, or prunes Docker resources. |
+| `flux container list/inspect/logs/stats/top/search` | no | no | Read-only container inspection. |
+| `flux container start/restart/pause/resume/pull` | yes | no | Changes container runtime state or image cache. |
+| `flux container stop/recreate/exec` | yes | yes | Stops/replaces containers or executes inside them. |
+| `flux host status/info/uptime/resources/services/network/mounts/ports/doctor` | no | no | Read-only host diagnostics. |
+| `flux compose list/status/logs` | no | no | Read-only Compose inspection. |
+| `flux compose up/build/pull` | yes | no | Starts services or changes image/build state. |
+| `flux compose down/restart/recreate` | yes | yes | Stops, restarts, or replaces services. |
+| `scout nodes/peek/find/ps/df/delta/zfs/logs` | no | no | Read-only SSH/local inspection. |
+| `scout exec/emit/beam` | yes | yes | Host command execution or file transfer. |
 
-## Full Action Reference
+## Response Shapes
 
-### `flux docker` parameters
+Representative response keys:
 
-| Param | Type | Required | Description |
-|---|---|---|---|
-| `action` | string | yes | `"docker"` |
-| `subaction` | string | yes | `info\|df\|images\|networks\|volumes\|pull\|build\|rmi\|prune` |
-| `host` | string | for write ops | Target host name; omit to fan out for read ops |
-| `dangling_only` | boolean | no | `images`: only list untagged images |
-| `image` | string | for pull/rmi | Image reference, e.g. `nginx:latest` |
-| `force` | boolean | for rmi/prune | Must be `true` to allow destructive ops |
-| `context` | string | for build | Absolute build context path |
-| `tag` | string | for build | Image tag (e.g. `myapp:latest`) |
-| `dockerfile` | string | no | Dockerfile path relative to context |
-| `no_cache` | boolean | no | Pass `--no-cache` to build |
-| `prune_target` | string | for prune | `containers\|images\|volumes\|networks\|buildcache\|all` |
-
-### `flux container` parameters
-
-| Param | Type | Required | Description |
-|---|---|---|---|
-| `action` | string | yes | `"container"` |
-| `subaction` | string | yes | `list\|inspect\|logs\|stats\|top\|search\|start\|stop\|restart\|pause\|resume\|pull\|recreate\|exec` |
-| `host` | string | no | Target host; fan-out when omitted |
-| `container_id` | string | most subactions | Container id or name |
-| `state` | string | no | `list`: `running\|exited\|paused\|restarting\|all` |
-| `name_filter` | string | no | `list`: partial match on container name |
-| `image_filter` | string | no | `list`: partial match on image |
-| `label_filter` | string | no | `list`: `key=value` label match |
-| `lines` | integer | no | `logs`: tail line count (default 50) |
-| `since` | string | no | `logs`: ISO8601, unix seconds, or duration (e.g. `"30m"`) |
-| `until` | string | no | `logs`: same formats as `since` |
-| `grep` | string | no | `logs`: keep only lines containing this string |
-| `stream` | string | no | `logs`: `stdout\|stderr\|both` (default `both`) |
-| `summary` | boolean | no | `inspect`: return abbreviated info only |
-| `query` | string | for search | `search`: full-text query |
-| `command` | array of strings | for exec | `exec`: argv (`["ls", "-la", "/var/log"]`) |
-| `exec_user` | string | no | `exec`: run as this user inside the container |
-| `exec_workdir` | string | no | `exec`: working directory inside the container |
-| `exec_timeout_ms` | integer | no | `exec`: timeout in ms [1000–300000], default 30000 |
-| `pull` | boolean | no | `recreate`: pull image before recreating (default true) |
-
-### `flux host` parameters
-
-| Param | Type | Required | Description |
-|---|---|---|---|
-| `action` | string | yes | `"host"` |
-| `subaction` | string | yes | `status\|info\|uptime\|resources\|services\|network\|mounts\|ports\|doctor` |
-| `host` | string | for services/mounts/ports/doctor | Target host name |
-| `state` | string | no | `services`: filter by state |
-| `service` | string | no | `services`: filter by service name |
-| `protocol` | string | no | `ports`: `tcp\|udp` |
-| `limit` | integer | no | `ports`: max results |
-| `offset` | integer | no | `ports`: pagination offset |
-| `checks` | string | no | `doctor`: comma-separated check names (default: all) |
-
-### `flux compose` parameters
-
-| Param | Type | Required | Description |
-|---|---|---|---|
-| `action` | string | yes | `"compose"` |
-| `subaction` | string | yes | `list\|status\|up\|down\|restart\|recreate\|logs\|build\|pull\|refresh` |
-| `host` | string | yes | Target host name |
-| `project` | string | most subactions | Compose project name |
-| `service` | string | no | `logs\|status\|build\|pull`: restrict to a single service |
-| `lines` | integer | no | `logs`: tail line count |
-| `since` | string | no | `logs`: start time filter |
-| `remove_volumes` | boolean | no | `down`: also remove named volumes |
-| `force` | boolean | for `down` with `remove_volumes` | Must be `true` when `remove_volumes=true` |
-
-### `flux help` parameters
-
-| Param | Type | Required | Description |
-|---|---|---|---|
-| `action` | string | yes | `"help"` |
-| `topic` | string | no | Topic key, e.g. `"container:list"`, `"docker:prune"`. Omit for the index. |
-| `format` | string | no | `markdown\|json` (default `markdown`) |
+```json
+{"hosts":[{"name":"local","protocol":"local"}]}
+{"containers":[{"host":"local","id":"...","name":"..."}],"partial":false}
+{"tool":"flux","topics":["container:list"],"actions":{"docker":["info"]}}
+```
 
 ---
 
-### `scout nodes` parameters
-
-No parameters (besides `action`).
-
-### `scout peek` parameters
-
-| Param | Type | Required | Description |
-|---|---|---|---|
-| `action` | string | yes | `"peek"` |
-| `host` | string | yes | Target host |
-| `path` | string | yes | Absolute path to file or directory |
-| `tree` | boolean | no | Emit a depth-limited directory tree |
-| `depth` | integer | no | Tree depth [1–20], default 3 |
-
-### `scout find` parameters
-
-| Param | Type | Required | Description |
-|---|---|---|---|
-| `action` | string | yes | `"find"` |
-| `host` | string | yes | Target host |
-| `path` | string | yes | Search root (absolute) |
-| `pattern` | string | yes | Glob pattern for `-name` (must not start with `-`) |
-| `depth` | integer | no | Max depth [1–20], default 10 |
-| `limit` | integer | no | Max results, default 500 |
-
-### `scout ps` parameters
-
-| Param | Type | Required | Description |
-|---|---|---|---|
-| `action` | string | yes | `"ps"` |
-| `host` | string | yes | Target host |
-| `sort` | string | no | Sort field: `cpu\|mem\|pid\|time` (default `cpu`) |
-| `grep` | string | no | Substring filter on process lines |
-| `user` | string | no | Prefix-match filter on user column |
-| `limit` | integer | no | Max results, default 50 |
-
-### `scout df` parameters
-
-| Param | Type | Required | Description |
-|---|---|---|---|
-| `action` | string | yes | `"df"` |
-| `host` | string | yes | Target host |
-| `path` | string | no | Restrict to this path |
-
-### `scout delta` parameters
-
-| Param | Type | Required | Description |
-|---|---|---|---|
-| `action` | string | yes | `"delta"` |
-| `source_host` | string | yes | Source host |
-| `source_path` | string | yes | Source absolute path |
-| `target_host` | string | mutually exclusive with `content` | Target host |
-| `target_path` | string | with `target_host` | Target absolute path |
-| `content` | string | mutually exclusive with `target_host` | Inline content to compare (≤1 MB) |
-
-### `scout exec` parameters
-
-| Param | Type | Required | Description |
-|---|---|---|---|
-| `action` | string | yes | `"exec"` |
-| `host` | string | yes | Target host |
-| `command` | string | yes | Command name from allowlist |
-| `args` | array of strings | no | Positional arguments (execvp-style) |
-| `path` | string | no | Working directory (local hosts only) |
-| `timeout_secs` | integer | no | Per-host timeout in seconds, default 30 |
-
-### `scout emit` parameters
-
-| Param | Type | Required | Description |
-|---|---|---|---|
-| `action` | string | yes | `"emit"` |
-| `targets` | array | yes | `[{"host": "h1"}, {"host": "h2", "path": "/srv"}]` |
-| `command` | string | yes | Command name from allowlist |
-| `args` | array of strings | no | Positional arguments |
-| `timeout_secs` | integer | no | Per-host timeout in seconds, default 30 |
-
-### `scout beam` parameters
-
-| Param | Type | Required | Description |
-|---|---|---|---|
-| `action` | string | yes | `"beam"` |
-| `source_host` | string | yes | Source host |
-| `source_path` | string | yes | Source absolute path |
-| `dest_host` | string | yes | Destination host |
-| `dest_path` | string | yes | Destination absolute path |
-
-### `scout zfs` parameters
-
-| Param | Type | Required | Description |
-|---|---|---|---|
-| `action` | string | yes | `"zfs"` |
-| `subaction` | string | yes | `pools\|datasets\|snapshots` |
-| `host` | string | yes | Target host |
-| `pool` | string | no | `pools`: exact pool name filter. `datasets`: restrict to pool. `snapshots`: restrict to pool if `dataset` not given. |
-| `dataset_type` | string | no | `datasets`: `filesystem\|volume\|snapshot\|bookmark\|all` |
-| `recursive` | boolean | no | `datasets`: list recursively (default false) |
-| `dataset` | string | no | `snapshots`: restrict to this dataset |
-| `limit` | integer | no | `snapshots`: max results |
-
-### `scout logs` parameters
-
-| Param | Type | Required | Description |
-|---|---|---|---|
-| `action` | string | yes | `"logs"` |
-| `subaction` | string | yes | `syslog\|journal\|dmesg\|auth` |
-| `host` | string | yes | Target host |
-| `lines` | integer | no | Lines to retrieve [1–500], default 100 |
-| `grep` | string | no | Local filter (applied after retrieval, injection-safe) |
-| `unit` | string | no | `journal`: systemd unit filter |
-| `priority` | string | no | `journal`: priority filter (`err\|warning\|info\|debug`) |
-| `since` | string | no | `journal`: start time, e.g. `"2026-05-29 00:00:00"` or `"-1h"` |
-| `until` | string | no | `journal`: end time |
-
-### `scout help` parameters
-
-| Param | Type | Required | Description |
-|---|---|---|---|
-| `action` | string | yes | `"help"` |
-| `topic` | string | no | Topic key, e.g. `"exec"`, `"zfs:pools"`. Omit for the index. |
-| `format` | string | no | `markdown\|json` (default `markdown`) |
-
----
-
-<!-- TIER 3: Workflows, HTTP fallback, error handling -->
+<!-- TIER 2: Workflows, fallback tiers, error handling -->
 
 ## Common Workflows
+
+Use neutral tool-call examples in shared skill docs:
+`flux(action="...", subaction="...")` and `scout(action="...")`.
+Codex may expose these as `mcp__synapse2__flux` and `mcp__synapse2__scout`.
 
 ### Investigate a host's Docker stack
 
 ```text
 # 1. Check connectivity
-mcp__synapse2__flux(action="host", subaction="status", host="myhost")
+flux(action="host", subaction="status", host="myhost")
 
 # 2. List running containers
-mcp__synapse2__flux(action="container", subaction="list", host="myhost", state="running")
+flux(action="container", subaction="list", host="myhost", state="running")
 
 # 3. Inspect a container
-mcp__synapse2__flux(action="container", subaction="inspect", host="myhost", container_id="abc123")
+flux(action="container", subaction="inspect", host="myhost", container_id="abc123")
 
 # 4. Read recent logs
-mcp__synapse2__flux(action="container", subaction="logs", host="myhost", container_id="abc123", lines=100, grep="ERROR")
+flux(action="container", subaction="logs", host="myhost", container_id="abc123", lines=100, grep="ERROR")
 
 # 5. Check overall disk usage
-mcp__synapse2__flux(action="docker", subaction="df", host="myhost")
+flux(action="docker", subaction="df", host="myhost")
 ```
 
 ### Diagnose a failing Compose stack
 
 ```text
 # 1. List all compose projects
-mcp__synapse2__flux(action="compose", subaction="list", host="myhost")
+flux(action="compose", subaction="list", host="myhost")
 
 # 2. Get project status
-mcp__synapse2__flux(action="compose", subaction="status", host="myhost", project="mystack")
+flux(action="compose", subaction="status", host="myhost", project="mystack")
 
 # 3. Read logs
-mcp__synapse2__flux(action="compose", subaction="logs", host="myhost", project="mystack", lines=200)
+flux(action="compose", subaction="logs", host="myhost", project="mystack", lines=200)
 
-# 4. Restart the stack
-mcp__synapse2__flux(action="compose", subaction="restart", host="myhost", project="mystack")
+# 4. Inspect resource pressure before mutating anything
+flux(action="host", subaction="resources", host="myhost")
+
+# 5. Only if explicitly approved: restart the stack
+flux(action="compose", subaction="restart", host="myhost", project="mystack")
 ```
 
 ### Investigate a remote host via SSH
 
 ```text
 # 1. List all nodes
-mcp__synapse2__scout(action="nodes")
+scout(action="nodes")
 
 # 2. Check processes
-mcp__synapse2__scout(action="ps", host="myhost", sort="cpu", limit=20)
+scout(action="ps", host="myhost", sort="cpu", limit=20)
 
 # 3. Read a config file
-mcp__synapse2__scout(action="peek", host="myhost", path="/etc/nginx/nginx.conf")
+scout(action="peek", host="myhost", path="/etc/nginx/nginx.conf")
 
 # 4. Read system logs
-mcp__synapse2__scout(action="logs", subaction="journal", host="myhost", since="-30m", priority="err")
+scout(action="logs", subaction="journal", host="myhost", since="-30m", priority="err")
 ```
 
 ### Check ZFS pool health (Unraid / TrueNAS)
 
 ```text
-mcp__synapse2__scout(action="zfs", subaction="pools", host="myhost")
-mcp__synapse2__scout(action="zfs", subaction="datasets", host="myhost", pool="tank")
-mcp__synapse2__scout(action="zfs", subaction="snapshots", host="myhost", dataset="tank/data")
+scout(action="zfs", subaction="pools", host="myhost")
+scout(action="zfs", subaction="datasets", host="myhost", pool="tank")
+scout(action="zfs", subaction="snapshots", host="myhost", dataset="tank/data")
 ```
 
-## HTTP Fallback
+## Fallback Tiers
+
+### Tier 1: MCP tools
+
+Use MCP first whenever the `flux` and `scout` tools are available.
+
+```text
+scout(action="nodes")
+flux(action="docker", subaction="info")
+```
+
+### Tier 2: CLI binary
+
+Use the `synapse` binary when MCP transport is unavailable but local shell access
+exists:
+
+```bash
+synapse scout nodes --response-format json
+synapse flux docker info --response-format json
+synapse doctor --json
+synapse setup check
+```
+
+### Tier 3: REST API
 
 When the MCP transport is unavailable, use `POST /v1/synapse2` with a bearer token:
 
 ```bash
-curl -sX POST http://localhost:3100/v1/synapse2 \
+curl -sX POST "http://${SYNAPSE_MCP_HOST:-127.0.0.1}:${SYNAPSE_MCP_PORT:-40080}/v1/synapse2" \
   -H "Authorization: Bearer $SYNAPSE_MCP_TOKEN" \
   -H "Content-Type: application/json" \
-  -d '{"action":"docker","params":{"subaction":"info"}}'
+  -d '{"action":"flux.docker.info","params":{}}'
 ```
 
 ## Error Handling
@@ -386,7 +241,17 @@ curl -sX POST http://localhost:3100/v1/synapse2 \
 |---|---|---|
 | `invalid_params` | Missing required param or unknown action/subaction | Check param names; use `help` action |
 | `invalid_request` | Destructive op denied at confirmation gate | User declined; no state changed |
-| `internal_error` | Service error (Docker unavailable, SSH timeout) | Check host connectivity, retry |
+| `unauthorized` | Missing or bad bearer token / OAuth token | Check `SYNAPSE_MCP_TOKEN`, auth mode, and plugin settings |
+| `internal_error` | Service error (Docker unavailable, SSH timeout) | Run diagnostics, check host connectivity, retry |
 
-If you get `unknown action`, run `flux(action="help")` or `scout(action="help")`
-for the current action list.
+Recovery commands:
+
+```text
+flux(action="help")
+scout(action="help")
+```
+
+```bash
+synapse doctor --json
+synapse setup check
+```
