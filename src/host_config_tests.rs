@@ -40,6 +40,7 @@ fn single_ssh_host_json(name: &str, host: &str) -> String {
         docker_socket_path: None,
         tags: Vec::new(),
         compose_search_paths: Vec::new(),
+        scout_read_roots: Vec::new(),
         exec_allowlist: Vec::new(),
     }])
     .unwrap()
@@ -403,6 +404,7 @@ fn merge_hosts_explicit_wins_on_conflict() {
         docker_socket_path: None,
         tags: Vec::new(),
         compose_search_paths: Vec::new(),
+        scout_read_roots: Vec::new(),
         exec_allowlist: Vec::new(),
     }];
     let ssh = vec![HostConfig {
@@ -417,6 +419,7 @@ fn merge_hosts_explicit_wins_on_conflict() {
         docker_socket_path: None,
         tags: Vec::new(),
         compose_search_paths: Vec::new(),
+        scout_read_roots: Vec::new(),
         exec_allowlist: Vec::new(),
     }];
     let merged = merge_hosts(explicit, ssh);
@@ -440,6 +443,7 @@ fn merge_hosts_ssh_only_hosts_are_added() {
             docker_socket_path: None,
             tags: Vec::new(),
             compose_search_paths: Vec::new(),
+            scout_read_roots: Vec::new(),
             exec_allowlist: Vec::new(),
         }],
     );
@@ -461,6 +465,7 @@ fn ensure_local_appends_when_absent() {
         docker_socket_path: None,
         tags: Vec::new(),
         compose_search_paths: Vec::new(),
+        scout_read_roots: Vec::new(),
         exec_allowlist: Vec::new(),
     }];
     let result = ensure_local(hosts);

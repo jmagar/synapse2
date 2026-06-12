@@ -1,7 +1,10 @@
 use serde_json::json;
 
 use crate::{
-    actions::{required_scope_for_action, READ_SCOPE, WRITE_SCOPE},
+    actions::{
+        required_scope_for_action, required_scope_for_parsed_action, SynapseAction, READ_SCOPE,
+        WRITE_SCOPE,
+    },
     token_limit::MAX_RESPONSE_BYTES,
 };
 
@@ -48,6 +51,16 @@ fn read_scope_does_not_satisfy_write() {
 #[test]
 fn docker_requires_read_scope() {
     assert_eq!(required_scope_for_action("docker"), Some(READ_SCOPE));
+}
+
+#[test]
+fn parsed_destructive_flux_subactions_require_write_scope() {
+    let action = SynapseAction::from_flux_args(&json!({
+        "action": "container",
+        "subaction": "stop"
+    }))
+    .unwrap();
+    assert_eq!(required_scope_for_parsed_action(&action), Some(WRITE_SCOPE));
 }
 
 #[test]

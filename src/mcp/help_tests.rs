@@ -129,3 +129,20 @@ fn scout_topic_keys_sorted() {
     sorted.sort_unstable();
     assert_eq!(keys, sorted, "scout_topic_keys() should return sorted keys");
 }
+
+#[test]
+fn flux_help_matches_required_host_contract() {
+    for topic in [
+        "host:services",
+        "host:mounts",
+        "host:ports",
+        "host:doctor",
+        "compose:list",
+    ] {
+        let text = topic_markdown(topic).expect("topic should exist");
+        assert!(
+            text.contains("`host` (required)"),
+            "{topic} should document host as required"
+        );
+    }
+}

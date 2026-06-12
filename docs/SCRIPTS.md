@@ -23,7 +23,7 @@ Maintenance scripts live in `scripts/`. The authoritative per-script usage refer
 |---|---|
 | Release gates | `pre-release-check.sh`, `check-version-sync.sh`, `check-blob-size.py`, `check-coupled-files.sh` |
 | Hygiene | `asciicheck.py`, `check-file-size.sh`, `block-env-commits.sh` |
-| MCP/plugin validation | `check-schema-docs.py`, `validate-plugin-layout.sh`, `check-plugin-hook-contract.py`, `test-mcp-auth.sh` |
+| MCP/plugin validation | `check-schema-docs.py`, `validate-plugin-layout.sh`, `test-mcp-auth.sh` |
 | Runtime/deploy | `check-runtime-current.sh`, `sync-cargo.sh`, `bump-version.sh` |
 | Reference docs | `refresh-docs.sh` |
 

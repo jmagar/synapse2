@@ -38,7 +38,7 @@ fn build_tool_definitions() -> Vec<Value> {
                         "type": "string",
                         "description": "For action=container: list|inspect|logs|stats|top|search|start|stop|restart|pause|resume|pull|recreate|exec. For action=docker: info|df|images|networks|volumes|pull|build|rmi|prune. For action=host: status|info|uptime|resources|services|network|mounts|ports|doctor. For action=compose: list|status|up|down|restart|recreate|logs|build|pull|refresh."
                     },
-                    "host": { "type": "string", "description": "Target host name; omit to fan out across all configured hosts for read-only docker/container ops. REQUIRED for docker pull/build/rmi/prune (single-host) and all compose ops." },
+                    "host": { "type": "string", "description": "Target host name. Omit to fan out for read-only docker/container ops and host status/info/uptime/resources/network. Required for docker pull/build/rmi/prune, host services/mounts/ports/doctor, and all compose ops including list." },
                     "project": { "type": "string", "description": "compose: project name (required for all compose subactions except list/refresh)." },
                     "remove_volumes": { "type": "boolean", "description": "compose down: also remove named volumes. Requires force=true to prevent accidental data loss." },
                     "force": { "type": "boolean", "description": "docker rmi/prune: must be true. compose down with remove_volumes=true: must be true." },
@@ -53,6 +53,9 @@ fn build_tool_definitions() -> Vec<Value> {
                     "container_id": { "type": "string", "description": "Container id or name (required for inspect/logs/top; optional for stats)." },
                     "lines": { "type": "integer", "minimum": 1, "maximum": 500, "description": "container logs / compose logs: tail line count (default 50 for container; all for compose)." },
                     "state": { "type": "string", "enum": ["running", "exited", "paused", "restarting", "all"], "description": "container list: filter by state (default all)." },
+                    "protocol": { "type": "string", "enum": ["tcp", "udp"], "description": "host ports: optional protocol filter." },
+                    "offset": { "type": "integer", "minimum": 0, "description": "host ports: pagination offset." },
+                    "checks": { "type": "string", "description": "host doctor: comma-separated checks to run (default docker,containers,resources,network,services,logs,processes)." },
                     "name_filter": { "type": "string", "description": "container list: partial match on container name." },
                     "image_filter": { "type": "string", "description": "container list: partial match on image." },
                     "label_filter": { "type": "string", "description": "container list: label match in key=value form." },

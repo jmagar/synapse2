@@ -13,7 +13,7 @@ use lab_auth::AuthContext;
 use serde::Deserialize;
 use serde_json::{json, Value};
 
-use crate::actions::{execute_service_action, required_scope_for_action, SynapseAction};
+use crate::actions::{execute_service_action, required_scope_for_parsed_action, SynapseAction};
 use crate::server::{AppState, AuthPolicy};
 use crate::token_limit::MAX_RESPONSE_BYTES;
 
@@ -40,11 +40,9 @@ pub async fn api_dispatch(
 ) -> impl IntoResponse {
     let result = match rest_action_from_request(&body.action, &body.params) {
         Ok(action) => {
-            if let Some(response) = enforce_rest_scope(
-                &state,
-                auth.as_ref().map(|Extension(auth)| auth),
-                &body.action,
-            ) {
+            if let Some(response) =
+                enforce_rest_scope(&state, auth.as_ref().map(|Extension(auth)| auth), &action)
+            {
                 return response;
             }
             // REST has no elicitation channel: destructive ops are hard-denied
@@ -159,14 +157,14 @@ fn cap_rest_response(value: Value) -> Result<Value> {
 fn enforce_rest_scope(
     state: &AppState,
     auth: Option<&AuthContext>,
-    action: &str,
+    action: &SynapseAction,
 ) -> Option<axum::response::Response> {
     if !matches!(&state.auth_policy, AuthPolicy::Mounted { .. }) {
         return None;
     }
-    let required_scope = required_scope_for_action(action)?;
+    let required_scope = required_scope_for_parsed_action(action)?;
     let Some(auth) = auth else {
-        tracing::warn!(action = %action, "REST action denied: missing auth context");
+        tracing::warn!(action = %action.name(), "REST action denied: missing auth context");
         return Some(
             (
                 StatusCode::FORBIDDEN,
@@ -181,7 +179,7 @@ fn enforce_rest_scope(
     }
     tracing::warn!(
         subject = %auth.sub,
-        action = %action,
+        action = %action.name(),
         required_scope = %required_scope,
         "REST action denied: insufficient scope"
     );

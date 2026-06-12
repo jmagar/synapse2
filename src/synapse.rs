@@ -1,6 +1,7 @@
 use anyhow::{bail, Result};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeSet;
+use std::path::{Component, Path};
 
 #[cfg(test)]
 #[path = "synapse_tests.rs"]
@@ -37,6 +38,8 @@ pub struct HostConfig {
     pub tags: Vec<String>,
     #[serde(rename = "composeSearchPaths", default)]
     pub compose_search_paths: Vec<String>,
+    #[serde(rename = "scoutReadRoots", default)]
+    pub scout_read_roots: Vec<String>,
     #[serde(rename = "execAllowlist", default)]
     pub exec_allowlist: Vec<String>,
 }
@@ -55,6 +58,7 @@ impl HostConfig {
             docker_socket_path: Some("/var/run/docker.sock".into()),
             tags: vec!["local".into()],
             compose_search_paths: Vec::new(),
+            scout_read_roots: vec!["/tmp".into()],
             exec_allowlist: Vec::new(),
         }
     }
@@ -119,6 +123,97 @@ pub fn validate_safe_path(path: &str) -> Result<()> {
     }
 
     Ok(())
+}
+
+pub fn validate_scout_read_path(host: &HostConfig, path: &str) -> Result<()> {
+    validate_safe_path(path)?;
+    reject_sensitive_read_path(path)?;
+
+    let roots = scout_allowed_read_roots(host);
+    if roots.is_empty() {
+        bail!("scout file reads are disabled for host {}", host.name);
+    }
+
+    if roots.iter().any(|root| path_is_under_root(path, root)) {
+        return Ok(());
+    }
+
+    bail!(
+        "path is outside configured scout read roots for host {}",
+        host.name
+    )
+}
+
+pub fn scout_allowed_read_roots(host: &HostConfig) -> Vec<String> {
+    let mut roots = Vec::new();
+    for root in host
+        .scout_read_roots
+        .iter()
+        .chain(host.compose_search_paths.iter())
+    {
+        let root = if root == "/" {
+            "/"
+        } else {
+            root.trim_end_matches('/')
+        };
+        if root.is_empty() {
+            continue;
+        }
+        if validate_safe_path(root).is_err() {
+            continue;
+        }
+        if !roots.iter().any(|existing| existing == root) {
+            roots.push(root.to_owned());
+        }
+    }
+    roots
+}
+
+fn reject_sensitive_read_path(path: &str) -> Result<()> {
+    let sensitive = Path::new(path).components().any(|component| {
+        let Component::Normal(part) = component else {
+            return false;
+        };
+        let part = part.to_string_lossy();
+        matches!(
+            part.as_ref(),
+            ".ssh"
+                | ".env"
+                | ".env.local"
+                | ".env.production"
+                | "authorized_keys"
+                | "id_rsa"
+                | "id_dsa"
+                | "id_ecdsa"
+                | "id_ed25519"
+        ) || part.ends_with(".pem")
+    });
+    if sensitive {
+        bail!("sensitive scout read path is not permitted");
+    }
+    Ok(())
+}
+
+fn path_is_under_root(path: &str, root: &str) -> bool {
+    if root == "/" {
+        return true;
+    }
+
+    let path_obj = Path::new(path);
+    let root_obj = Path::new(root);
+    if path_obj.exists() && root_obj.exists() {
+        if let (Ok(canonical_path), Ok(canonical_root)) = (
+            std::fs::canonicalize(path_obj),
+            std::fs::canonicalize(root_obj),
+        ) {
+            return canonical_path.starts_with(canonical_root);
+        }
+    }
+
+    path == root
+        || path
+            .strip_prefix(root)
+            .is_some_and(|rest| rest.starts_with('/'))
 }
 
 pub fn validate_command(command: &str, host_allowlist: &[String]) -> Result<()> {

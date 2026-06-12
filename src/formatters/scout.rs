@@ -297,11 +297,23 @@ fn render_log_markdown(title: &str, data: &Value) -> String {
     let host = str_field(data, "host");
     let lines_requested = data
         .get("lines_requested")
+        .or_else(|| data.get("lines"))
         .and_then(|v| v.as_u64())
         .unwrap_or(50);
-    let logs = data.get("logs").and_then(|v| v.as_str()).unwrap_or("");
-    let grep_filter = data.get("grep_filter").and_then(|v| v.as_str());
+    let logs = data
+        .get("logs")
+        .or_else(|| data.get("output"))
+        .and_then(|v| v.as_str())
+        .unwrap_or("");
+    let grep_filter = data
+        .get("grep_filter")
+        .or_else(|| data.get("grep"))
+        .and_then(|v| v.as_str());
     let timestamp = format_timestamp();
+    let truncated = data
+        .get("truncated")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false);
 
     let actual_lines = logs.lines().filter(|l| !l.trim().is_empty()).count();
     let filter_part = grep_filter
@@ -309,7 +321,8 @@ fn render_log_markdown(title: &str, data: &Value) -> String {
         .unwrap_or_default();
 
     format!(
-        "{title}: {host}\nLines requested: {lines_requested} | Returned: {actual_lines}{filter_part}\n{timestamp}\n\n```\n{logs}\n```"
+        "{title}: {host}\nLines requested: {lines_requested} | Returned: {actual_lines} | truncated: {}{filter_part}\n{timestamp}\n\n```\n{logs}\n```",
+        if truncated { "yes" } else { "no" }
     )
 }
 

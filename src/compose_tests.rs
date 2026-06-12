@@ -106,6 +106,7 @@ fn host_with_paths(paths: &[&str]) -> HostConfig {
         docker_socket_path: None,
         tags: Vec::new(),
         compose_search_paths: paths.iter().map(|s| s.to_string()).collect(),
+        scout_read_roots: Vec::new(),
         exec_allowlist: Vec::new(),
     }
 }

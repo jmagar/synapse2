@@ -132,9 +132,9 @@ commands, covering all 59 production actions from the original TypeScript server
 ## Configuration
 
 ```bash
-SYNAPSE2_MCP_HOST=127.0.0.1
-SYNAPSE2_MCP_PORT=3100
-SYNAPSE2_MCP_TOKEN=change-me
+SYNAPSE_MCP_HOST=127.0.0.1
+SYNAPSE_MCP_PORT=40080
+SYNAPSE_MCP_TOKEN=change-me
 ```
 
 See `.env.example` for the full list of variables and `docs/CONFIG.md` for auth

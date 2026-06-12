@@ -27,7 +27,6 @@
 use anyhow::Result;
 use async_trait::async_trait;
 use serde_json::{json, Value};
-use std::process::Command;
 
 use crate::ssh::{CommandOutput, SshExecutor};
 use crate::synapse::{HostConfig, HostProtocol};
@@ -51,12 +50,7 @@ pub struct LocalExec;
 #[async_trait]
 impl HostExec for LocalExec {
     async fn run(&self, program: &str, args: &[&str]) -> Result<CommandOutput> {
-        let output = Command::new(program).args(args).output()?;
-        Ok(CommandOutput {
-            stdout: String::from_utf8_lossy(&output.stdout).into_owned(),
-            stderr: String::from_utf8_lossy(&output.stderr).into_owned(),
-            exit_code: output.status.code(),
-        })
+        crate::runtime_budget::run_local_command(program, args, None).await
     }
 }
 

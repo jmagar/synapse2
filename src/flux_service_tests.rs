@@ -88,6 +88,7 @@ fn test_host(name: &str) -> HostConfig {
         docker_socket_path: None,
         tags: Vec::new(),
         compose_search_paths: Vec::new(),
+        scout_read_roots: Vec::new(),
         exec_allowlist: Vec::new(),
     }
 }

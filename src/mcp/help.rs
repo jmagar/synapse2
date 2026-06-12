@@ -460,7 +460,7 @@ const HOST_SERVICES: &str = "\
 List systemd services.
 
 **Parameters**
-- `host` (optional): target host name.
+- `host` (required): target host name.
 - `state` (optional): filter by service state.
 - `service` (optional): filter by service name substring.";
 
@@ -474,13 +474,13 @@ const HOST_MOUNTS: &str = "\
 Mounted filesystems.
 
 **Parameters**
-- `host` (optional): target host name.";
+- `host` (required): target host name.";
 
 const HOST_PORTS: &str = "\
 Listening TCP/UDP ports.
 
 **Parameters**
-- `host` (optional): target host name.
+- `host` (required): target host name.
 - `protocol` (optional): `tcp` | `udp`.
 - `limit` / `offset` (int, optional): pagination.";
 
@@ -488,16 +488,16 @@ const HOST_DOCTOR: &str = "\
 Pre-flight connectivity checks for a host.
 
 **Parameters**
-- `host` (optional): target host name.
+- `host` (required): target host name.
 - `checks` (optional): comma-separated check names to run.";
 
 // compose: subactions
 
 const COMPOSE_LIST: &str = "\
-List all discovered compose projects across configured hosts.
+List discovered compose projects on a single host.
 
 **Parameters**
-- `host` (optional): target host name. Omit to list across all hosts.";
+- `host` (required): target host name.";
 
 const COMPOSE_STATUS: &str = "\
 Show status of a compose project.

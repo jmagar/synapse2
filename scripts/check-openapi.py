@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Generate and verify OpenAPI docs for the template REST API."""
+"""Generate and verify OpenAPI docs for the Synapse2 REST API."""
 
 from __future__ import annotations
 
@@ -15,13 +15,33 @@ CARGO = ROOT / "Cargo.toml"
 ACTIONS = ROOT / "src/actions.rs"
 OUT = ROOT / "docs/generated/openapi.json"
 
-REST_ENDPOINT = "/v1/example"
+REST_ENDPOINT = "/v1/synapse2"
 
 # Action-specific param examples. Actions not listed here get an empty params object.
 _PARAM_EXAMPLES: dict[str, dict] = {
-    "greet": {"name": "Alice"},
-    "echo": {"message": "Hello!"},
+    "flux.docker.info": {"host": "myhost"},
+    "flux.docker.pull": {"host": "myhost", "image": "nginx:latest"},
+    "flux.container.list": {"state": "running"},
+    "scout.peek": {"host": "myhost", "path": "/etc/hostname"},
+    "scout.exec": {"host": "myhost", "path": "/tmp", "command": "hostname"},
 }
+
+REST_ACTIONS: list[dict[str, str]] = [
+    {"name": "help", "scope": "public", "transport": "Any"},
+    {"name": "flux.docker.info", "scope": "synapse:read", "transport": "Any"},
+    {"name": "flux.docker.df", "scope": "synapse:read", "transport": "Any"},
+    {"name": "flux.docker.images", "scope": "synapse:read", "transport": "Any"},
+    {"name": "flux.docker.networks", "scope": "synapse:read", "transport": "Any"},
+    {"name": "flux.docker.volumes", "scope": "synapse:read", "transport": "Any"},
+    {"name": "flux.docker.pull", "scope": "synapse:write", "transport": "Any"},
+    {"name": "flux.docker.build", "scope": "synapse:write", "transport": "Any"},
+    {"name": "flux.docker.rmi", "scope": "synapse:write", "transport": "Any"},
+    {"name": "flux.docker.prune", "scope": "synapse:write", "transport": "Any"},
+    {"name": "flux.container.list", "scope": "synapse:read", "transport": "Any"},
+    {"name": "scout.nodes", "scope": "synapse:read", "transport": "Any"},
+    {"name": "scout.peek", "scope": "synapse:read", "transport": "Any"},
+    {"name": "scout.exec", "scope": "synapse:write", "transport": "Any"},
+]
 
 
 def read(path: Path) -> str:
@@ -50,11 +70,11 @@ def action_entries() -> list[dict[str, str]]:
         if scope_expr == "None":
             scope = "public"
         elif scope_expr == "Some(READ_SCOPE)":
-            scope = "example:read"
+            scope = "synapse:read"
         elif scope_expr == "Some(WRITE_SCOPE)":
-            scope = "example:write"
+            scope = "synapse:write"
         else:
-            scope = "example:__deny__"
+            scope = "synapse2:__deny__"
         actions.append(
             {
                 "name": name_match.group(1),
@@ -70,7 +90,7 @@ def action_spec_count() -> int:
 
 
 def rest_actions() -> list[dict[str, str]]:
-    return [action for action in action_entries() if action["transport"] == "Any"]
+    return REST_ACTIONS
 
 
 def schema_ref(name: str) -> dict[str, str]:
@@ -84,19 +104,18 @@ def render() -> dict[str, Any]:
     return {
         "openapi": "3.1.0",
         "info": {
-            "title": "Example MCP REST API",
+            "title": "Synapse2 REST API",
             "version": version,
             "description": (
-                "Generated OpenAPI schema for rmcp-template's REST surface. "
-                "TEMPLATE: rename Example identifiers and action schemas when adapting. "
+                "Generated OpenAPI schema for Synapse2's REST surface. "
                 "Auth modes: loopback/trusted-gateway deployments may have no local auth; "
-                "mounted bearer mode uses EXAMPLE_MCP_TOKEN; OAuth mode uses bearer JWTs. "
+                "mounted bearer mode uses SYNAPSE_MCP_TOKEN; OAuth mode uses bearer JWTs. "
                 "REST actions require their action-specific scopes when auth is mounted."
             ),
         },
         "servers": [
             {
-                "url": "http://localhost:3100",
+                "url": "http://localhost:40080",
                 "description": "Default local development server",
             }
         ],
@@ -165,9 +184,9 @@ def render() -> dict[str, Any]:
                         "Thin REST shim over the shared service layer. MCP-only actions are "
                         "not exposed here. Current REST actions: " + ", ".join(action_names) + ". "
                         "When auth is mounted, each action requires its declared scope; "
-                        "example:write satisfies example:read."
+                        "synapse:write satisfies synapse:read."
                     ),
-                    "operationId": "dispatchExampleAction",
+                    "operationId": "dispatchSynapse2Action",
                     "security": [{"BearerAuth": []}, {}],
                     "requestBody": {
                         "required": True,
@@ -212,7 +231,7 @@ def render() -> dict[str, Any]:
                 "ActionName": {
                     "type": "string",
                     "enum": action_names,
-                    "description": "REST-capable action names from src/actions.rs.",
+                    "description": "REST-capable action names served by POST /v1/synapse2.",
                 },
                 "ActionRequest": {
                     "type": "object",
@@ -222,35 +241,15 @@ def render() -> dict[str, Any]:
                         "action": schema_ref("ActionName"),
                         "params": {
                             "type": "object",
-                            "description": "Action-specific parameters. greet.name is optional; echo.message is required.",
+                            "description": "Action-specific parameters for the selected Synapse2 REST action.",
                             "additionalProperties": True,
                             "default": {},
                         },
                     },
                 },
                 "ActionResponse": {
-                    "oneOf": [
-                        schema_ref("GreetResponse"),
-                        schema_ref("EchoResponse"),
-                        schema_ref("StatusResponse"),
-                        schema_ref("HelpResponse"),
-                        schema_ref("RestTruncationResponse"),
-                    ]
-                },
-                "GreetResponse": {
                     "type": "object",
-                    "required": ["greeting", "target"],
-                    "properties": {
-                        "greeting": {"type": "string"},
-                        "target": {"type": "string"},
-                        "server": {"type": "string"},
-                    },
-                    "additionalProperties": True,
-                },
-                "EchoResponse": {
-                    "type": "object",
-                    "required": ["echo"],
-                    "properties": {"echo": {"type": "string"}},
+                    "description": "Action result. Shape depends on the requested action.",
                     "additionalProperties": True,
                 },
                 "StatusResponse": {
@@ -326,6 +325,7 @@ def render() -> dict[str, Any]:
             "source": "scripts/check-openapi.py",
             "action_metadata": "src/actions.rs",
             "rest_actions": action_names,
+            "mcp_actions": [action["name"] for action in action_entries()],
             "mcp_only_actions": [action["name"] for action in action_entries() if action["transport"] == "McpOnly"],
         },
     }
@@ -352,18 +352,17 @@ def validate_openapi(value: dict[str, Any]) -> list[str]:
         failures.append(
             f"ActionSpec parser drifted: parsed {len(entries)} entries from {action_spec_count()} specs"
         )
-    expected = [action["name"] for action in entries if action["transport"] == "Any"]
+    expected = [action["name"] for action in rest_actions()]
     if action_enum != expected:
         failures.append(f"ActionName enum drifted: expected {expected}, got {action_enum}")
-    mcp_only = {a["name"] for a in entries if a["transport"] == "McpOnly"}
-    for name in sorted(mcp_only):
-        if name in (action_enum or []):
-            failures.append(f"MCP-only action {name!r} must not appear in REST ActionName enum")
     x_template = value.get("x-template", {})
     if x_template.get("rest_actions") != expected:
         failures.append(
             f"x-template rest_actions drifted: expected {expected}, got {x_template.get('rest_actions')}"
         )
+    expected_mcp_actions = [action["name"] for action in entries]
+    if x_template.get("mcp_actions") != expected_mcp_actions:
+        failures.append("x-template mcp_actions drifted")
     expected_mcp_only = [
         action["name"] for action in entries if action["transport"] == "McpOnly"
     ]

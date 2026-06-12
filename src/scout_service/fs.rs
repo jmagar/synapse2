@@ -16,7 +16,7 @@ mod tests;
 
 use crate::flux_service::host::{is_local_host, HostExec, LocalExec, RemoteExec};
 use crate::ssh::SshExecutor;
-use crate::synapse::{validate_safe_path, HostConfig};
+use crate::synapse::{validate_scout_read_path, HostConfig};
 
 /// Maximum inline content size for `delta` content mode.
 pub const DELTA_MAX_CONTENT_BYTES: usize = 1024 * 1024; // 1 MB
@@ -36,8 +36,7 @@ pub async fn peek(
     tree: bool,
     depth: u8,
 ) -> Result<Value> {
-    // SECURITY: syntactic + symlink guard (see module doc for remote caveat).
-    validate_safe_path(path)?;
+    validate_scout_read_path(host, path)?;
 
     let depth = depth.clamp(1, 10);
 
@@ -130,7 +129,7 @@ pub async fn find(
     depth: Option<u8>,
     limit: Option<u32>,
 ) -> Result<Value> {
-    validate_safe_path(path)?;
+    validate_scout_read_path(host, path)?;
 
     // Pattern guard: reject leading `-` to prevent option injection.
     if pattern.starts_with('-') {
@@ -192,7 +191,7 @@ pub async fn delta(
     target_path: Option<&str>,
     content: Option<&str>,
 ) -> Result<Value> {
-    validate_safe_path(source_path)?;
+    validate_scout_read_path(source_host, source_path)?;
 
     // VALIDATION FIRST — content size checked before any IO.
     if let Some(inline) = content {
@@ -203,7 +202,7 @@ pub async fn delta(
 
     match (target_host, target_path, content) {
         (Some(th), Some(tp), None) => {
-            validate_safe_path(tp)?;
+            validate_scout_read_path(th, tp)?;
             let source_content = read_remote_file(source_host, executor, source_path).await?;
             let source_label = format!("{}:{}", source_host.name, source_path);
             let target_content = read_remote_file(th, executor, tp).await?;
@@ -243,8 +242,10 @@ async fn read_remote_file(
     path: &str,
 ) -> Result<String> {
     if is_local_host(host) {
+        validate_scout_read_path(host, path)?;
         Ok(std::fs::read_to_string(path)?)
     } else {
+        validate_scout_read_path(host, path)?;
         let out = executor.exec(host, "cat", &[path]).await?;
         if out.exit_code != Some(0) && !out.stderr.is_empty() {
             bail!("read {path}: {}", out.stderr.trim());

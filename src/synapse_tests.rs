@@ -1,4 +1,4 @@
-use super::{validate_command, validate_safe_path};
+use super::{validate_command, validate_safe_path, validate_scout_read_path, HostConfig};
 use std::fs;
 
 #[test]
@@ -91,4 +91,43 @@ fn validate_command_rejects_git() {
         "git should not be in ALLOWED_READ_COMMANDS — got {result:?}"
     );
     assert!(result.unwrap_err().to_string().contains("not allowlisted"));
+}
+
+#[test]
+fn scout_read_paths_must_stay_under_allowed_roots() {
+    let host = HostConfig::local();
+    assert!(validate_scout_read_path(&host, "/tmp/synapse2-readable.log").is_ok());
+
+    let result = validate_scout_read_path(&host, "/etc/passwd");
+    assert!(
+        result.is_err(),
+        "default local host must not allow /etc reads"
+    );
+    assert!(result
+        .unwrap_err()
+        .to_string()
+        .contains("outside configured scout read roots"));
+}
+
+#[test]
+fn scout_read_paths_reject_sensitive_env_and_ssh_paths() {
+    let host = HostConfig::local();
+
+    let env_result = validate_scout_read_path(&host, "/tmp/project/.env");
+    assert!(env_result.is_err(), ".env reads must be denied");
+    assert!(env_result.unwrap_err().to_string().contains("sensitive"));
+
+    let ssh_result = validate_scout_read_path(&host, "/tmp/project/.ssh/id_rsa");
+    assert!(ssh_result.is_err(), "SSH private key reads must be denied");
+    assert!(ssh_result.unwrap_err().to_string().contains("sensitive"));
+}
+
+#[test]
+fn scout_read_roots_include_configured_compose_paths() {
+    let mut host = HostConfig::local();
+    host.scout_read_roots.clear();
+    host.compose_search_paths = vec!["/srv/compose".into()];
+
+    assert!(validate_scout_read_path(&host, "/srv/compose/app/docker-compose.yml").is_ok());
+    assert!(validate_scout_read_path(&host, "/srv/other/app.env").is_err());
 }

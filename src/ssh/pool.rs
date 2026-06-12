@@ -278,7 +278,12 @@ impl SshExecutor for SshPool {
             command.arg(*arg);
         }
 
-        match command.output().await {
+        match crate::runtime_budget::with_operation_deadline(
+            &format!("ssh command `{program}` on {}", host.name),
+            command.output(),
+        )
+        .await
+        {
             Ok(output) => {
                 pooled.touch();
                 Ok(CommandOutput {

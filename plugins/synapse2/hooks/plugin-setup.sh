@@ -24,10 +24,6 @@ export_if_set() {
 }
 
 ensure_synapse2_binary() {
-  if command -v synapse >/dev/null 2>&1; then
-    return 0
-  fi
-
   local bundled="${CLAUDE_PLUGIN_ROOT}/bin/synapse"
   if [[ ! -x "${bundled}" ]]; then
     printf 'synapse2 plugin setup: bundled binary not found at %s\n' "${bundled}" >&2
@@ -38,15 +34,13 @@ ensure_synapse2_binary() {
   mkdir -p "${HOME}/.local/bin"
   ln -sf "${bundled}" "${HOME}/.local/bin/synapse"
   export PATH="${HOME}/.local/bin:${PATH}"
-
-  command -v synapse >/dev/null 2>&1 || {
-    printf 'synapse2 plugin setup: symlink created but synapse still not found in PATH\n' >&2
-    printf '  → ensure %s is on your PATH\n' "${HOME}/.local/bin" >&2
-    exit 1
-  }
+  printf '%s\n' "${bundled}"
 }
 
 main() {
+  local synapse_bin
+  synapse_bin="$(ensure_synapse2_binary)"
+
   reject_unsafe_value "CLAUDE_PLUGIN_OPTION_API_TOKEN" "${CLAUDE_PLUGIN_OPTION_API_TOKEN:-}"
   export_if_set SYNAPSE_MCP_TOKEN CLAUDE_PLUGIN_OPTION_API_TOKEN
   export_if_set SYNAPSE_SERVER_URL CLAUDE_PLUGIN_OPTION_SERVER_URL
@@ -63,8 +57,7 @@ main() {
   chmod 700 "${SYNAPSE_HOME}" 2>/dev/null || true
   export SYNAPSE_HOME
 
-  ensure_synapse2_binary
-  synapse setup plugin-hook "$@"
+  "${synapse_bin}" setup plugin-hook "$@"
 }
 
 main "$@"

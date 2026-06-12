@@ -24,7 +24,7 @@ use rmcp::{
 use serde_json::{Map, Value};
 
 use crate::{
-    actions::{is_known_action, required_scope_for_action, ValidationError},
+    actions::{required_scope_for_parsed_action, SynapseAction},
     token_limit,
 };
 
@@ -67,15 +67,6 @@ impl ServerHandler for SynapseRmcpServer {
     ) -> Result<CallToolResult, ErrorData> {
         let tool_name = request.name.to_string();
 
-        // Extract action before scope check so a missing action returns the
-        // more useful "action is required" validation error, not DENY_SCOPE.
-        let action_opt: Option<String> = request
-            .arguments
-            .as_ref()
-            .and_then(|m| m.get("action"))
-            .and_then(Value::as_str)
-            .map(ToOwned::to_owned);
-
         let auth = require_auth_context(&self.state, &context)?;
         if tool_name != "flux" && tool_name != "scout" {
             return Err(ErrorData::invalid_params(
@@ -84,25 +75,43 @@ impl ServerHandler for SynapseRmcpServer {
             ));
         }
 
+        let arguments = request
+            .arguments
+            .map(Value::Object)
+            .unwrap_or_else(|| Value::Object(Map::new()));
+
+        // Extract action before scope check so a missing action returns the
+        // more useful "action is required" validation error, not DENY_SCOPE.
+        let action_opt: Option<String> = arguments
+            .get("action")
+            .and_then(Value::as_str)
+            .map(ToOwned::to_owned);
+
+        let parsed_action = if action_opt.is_some() {
+            match parse_mcp_action(&tool_name, &arguments) {
+                Ok(action) => Some(action),
+                Err(error) if auth.is_some() => return Err(error),
+                Err(_) => return Err(ErrorData::invalid_request("invalid request", None)),
+            }
+        } else {
+            None
+        };
+
         // SECURITY FIX: Before auth succeeds, return generic error for both unknown
         // actions and missing scopes. This prevents unauthenticated probes from
         // enumerating valid action names.
         if let Some(auth_ctx) = auth {
             // Authenticated: safe to return specific errors
-            if let Some(action_str) = action_opt.as_deref() {
-                reject_unknown_action_before_scope(action_str)?;
-                if let Some(required_scope) = required_scope_for_action(action_str) {
-                    check_scope(auth_ctx, required_scope, action_str)?;
+            if let Some(parsed_action) = parsed_action.as_ref() {
+                if let Some(required_scope) = required_scope_for_parsed_action(parsed_action) {
+                    check_scope(auth_ctx, required_scope, parsed_action.name())?;
                 }
             }
         } else {
             // Unauthenticated (loopback or trusted gateway): still validate action
             // but don't leak information before scope check
-            if let Some(action_str) = action_opt.as_deref() {
-                if !is_known_action(action_str) {
-                    return Err(ErrorData::invalid_request("invalid request", None));
-                }
-                if let Some(required_scope) = required_scope_for_action(action_str) {
+            if let Some(parsed_action) = parsed_action.as_ref() {
+                if let Some(required_scope) = required_scope_for_parsed_action(parsed_action) {
                     if required_scope != crate::actions::READ_SCOPE
                         && required_scope != crate::actions::WRITE_SCOPE
                     {
@@ -113,11 +122,6 @@ impl ServerHandler for SynapseRmcpServer {
         }
 
         let action: String = action_opt.unwrap_or_default();
-
-        let arguments = request
-            .arguments
-            .map(Value::Object)
-            .unwrap_or_else(|| Value::Object(Map::new()));
 
         validate_response_format_arg(&arguments)?;
 
@@ -308,17 +312,27 @@ fn validate_response_format_arg(args: &Value) -> Result<(), ErrorData> {
         .map_err(|e| ErrorData::invalid_params(e, None))
 }
 
+#[cfg(test)]
 fn reject_unknown_action_before_scope(action: &str) -> Result<(), ErrorData> {
-    if is_known_action(action) {
+    if crate::actions::is_known_action(action) {
         return Ok(());
     }
     Err(ErrorData::invalid_params(
-        ValidationError::UnknownAction {
+        crate::actions::ValidationError::UnknownAction {
             action: action.to_owned(),
         }
         .to_string(),
         None,
     ))
+}
+
+fn parse_mcp_action(tool_name: &str, arguments: &Value) -> Result<SynapseAction, ErrorData> {
+    match tool_name {
+        "flux" => SynapseAction::from_flux_args(arguments),
+        "scout" => SynapseAction::from_scout_args(arguments),
+        _ => unreachable!("tool name validated before parse_mcp_action"),
+    }
+    .map_err(|error| ErrorData::invalid_params(error.to_string(), None))
 }
 
 fn internal_tool_error_message(action: &str) -> String {

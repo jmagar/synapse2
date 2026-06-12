@@ -22,6 +22,7 @@ fn local_host(name: &str) -> HostConfig {
         docker_socket_path: None,
         tags: vec![],
         compose_search_paths: vec![],
+        scout_read_roots: vec![],
         exec_allowlist: vec![],
     }
 }
@@ -39,6 +40,7 @@ fn remote_host(name: &str) -> HostConfig {
         docker_socket_path: None,
         tags: vec![],
         compose_search_paths: vec![],
+        scout_read_roots: vec![],
         exec_allowlist: vec![],
     }
 }

@@ -25,6 +25,20 @@ pub async fn execute_service_action(
     action: &SynapseAction,
     confirmer: &dyn crate::elicitation_gate::Confirmer,
 ) -> Result<Value> {
+    let label = action_timeout_label(action);
+    let value = crate::runtime_budget::with_operation_deadline(
+        &label,
+        execute_service_action_inner(service, action, confirmer),
+    )
+    .await?;
+    Ok(crate::runtime_budget::cap_service_value(value))
+}
+
+async fn execute_service_action_inner(
+    service: &SynapseService,
+    action: &SynapseAction,
+    confirmer: &dyn crate::elicitation_gate::Confirmer,
+) -> Result<Value> {
     match action {
         SynapseAction::FluxHelp { topic, format } => {
             service
@@ -114,6 +128,28 @@ pub async fn execute_service_action(
         }
         SynapseAction::ScoutZfs(a) => dispatch_scout_zfs(service, a).await,
         SynapseAction::ScoutLogs(a) => dispatch_scout_logs(service, a).await,
+    }
+}
+
+fn action_timeout_label(action: &SynapseAction) -> String {
+    match action {
+        SynapseAction::FluxHelp { .. } => "flux help".to_owned(),
+        SynapseAction::FluxDocker(args) => format!("flux docker {}", args.subaction),
+        SynapseAction::FluxContainer(args) => format!("flux container {}", args.subaction),
+        SynapseAction::FluxHost(args) => format!("flux host {}", args.subaction),
+        SynapseAction::FluxCompose(args) => format!("flux compose {}", args.subaction),
+        SynapseAction::ScoutHelp { .. } => "scout help".to_owned(),
+        SynapseAction::ScoutNodes => "scout nodes".to_owned(),
+        SynapseAction::ScoutPeek { .. } => "scout peek".to_owned(),
+        SynapseAction::ScoutFind(_) => "scout find".to_owned(),
+        SynapseAction::ScoutPs(_) => "scout ps".to_owned(),
+        SynapseAction::ScoutDf { .. } => "scout df".to_owned(),
+        SynapseAction::ScoutDelta(_) => "scout delta".to_owned(),
+        SynapseAction::ScoutExec(_) => "scout exec".to_owned(),
+        SynapseAction::ScoutEmit(_) => "scout emit".to_owned(),
+        SynapseAction::ScoutBeam(_) => "scout beam".to_owned(),
+        SynapseAction::ScoutZfs(args) => format!("scout zfs {}", args.subaction),
+        SynapseAction::ScoutLogs(args) => format!("scout logs {}", args.subaction),
     }
 }
 

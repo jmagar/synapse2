@@ -34,6 +34,7 @@ pub mod formatters;
 pub mod host_config;
 pub mod logging;
 pub mod mcp;
+pub mod runtime_budget;
 pub mod scaffold;
 pub mod scout;
 pub mod scout_service;

@@ -239,6 +239,46 @@ pub fn required_scope_for_action(action: &str) -> Option<&'static str> {
         .unwrap_or(Some(DENY_SCOPE))
 }
 
+/// Derive scope from the parsed action, including flux subactions.
+///
+/// Top-level flux actions mix read-only and mutating subactions behind one
+/// MCP/CLI action name, so mounted auth must authorize the parsed shape rather
+/// than the raw `action` string.
+pub fn required_scope_for_parsed_action(action: &SynapseAction) -> Option<&'static str> {
+    match action {
+        SynapseAction::FluxDocker(args) => scope_for_flux_docker_subaction(&args.subaction),
+        SynapseAction::FluxContainer(args) => scope_for_flux_container_subaction(&args.subaction),
+        SynapseAction::FluxCompose(args) => scope_for_flux_compose_subaction(&args.subaction),
+        _ => required_scope_for_action(action.name()),
+    }
+}
+
+fn scope_for_flux_docker_subaction(subaction: &str) -> Option<&'static str> {
+    match subaction {
+        "info" | "df" | "images" | "networks" | "volumes" => Some(READ_SCOPE),
+        "pull" | "build" | "rmi" | "prune" => Some(WRITE_SCOPE),
+        _ => Some(DENY_SCOPE),
+    }
+}
+
+fn scope_for_flux_container_subaction(subaction: &str) -> Option<&'static str> {
+    match subaction {
+        "list" | "search" | "stats" | "inspect" | "top" | "logs" => Some(READ_SCOPE),
+        "start" | "stop" | "restart" | "pause" | "resume" | "pull" | "recreate" | "exec" => {
+            Some(WRITE_SCOPE)
+        }
+        _ => Some(DENY_SCOPE),
+    }
+}
+
+fn scope_for_flux_compose_subaction(subaction: &str) -> Option<&'static str> {
+    match subaction {
+        "list" | "refresh" | "status" | "logs" => Some(READ_SCOPE),
+        "up" | "down" | "restart" | "recreate" | "build" | "pull" => Some(WRITE_SCOPE),
+        _ => Some(DENY_SCOPE),
+    }
+}
+
 fn action_spec(action: &str) -> Option<&'static ActionSpec> {
     ACTION_SPECS.iter().find(|spec| spec.name == action)
 }

@@ -35,7 +35,9 @@ if changed "scripts/*" && ! changed "scripts/README.md"; then
 fi
 
 if changed "src/mcp/schemas.rs" && ! changed "docs/MCP_SCHEMA.md"; then
-  issues+=("src/mcp/schemas.rs changed but docs/MCP_SCHEMA.md did not; run scripts/check-schema-docs.py --write.")
+  if ! python3 scripts/check-schema-docs.py --check >/dev/null; then
+    issues+=("src/mcp/schemas.rs changed but docs/MCP_SCHEMA.md did not; run scripts/check-schema-docs.py --write.")
+  fi
 fi
 
 if changed "plugins/example/*" && ! changed "docs/PLUGINS.md"; then

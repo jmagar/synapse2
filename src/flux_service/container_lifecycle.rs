@@ -32,6 +32,7 @@ use serde_json::{json, Value};
 use std::time::Duration;
 
 use crate::docker_client::{ContainerAction, ContainerOps, ImageOps};
+use crate::runtime_budget::{append_lossy_bounded, SERVICE_TEXT_FIELD_BYTE_CAP};
 
 // ── Exec params ────────────────────────────────────────────────────────────────
 
@@ -67,6 +68,10 @@ pub struct ExecResult {
     pub stderr: String,
     /// Exit code from `inspect_exec`. `None` if inspection could not determine it.
     pub exit_code: Option<i64>,
+    /// True when stdout hit the service text cap while streaming.
+    pub stdout_truncated: bool,
+    /// True when stderr hit the service text cap while streaming.
+    pub stderr_truncated: bool,
 }
 
 // ── Recreate params ────────────────────────────────────────────────────────────
@@ -324,6 +329,20 @@ pub async fn exec_on_host(
         .map_err(|_elapsed| bollard::errors::Error::RequestTimeoutError)?;
 
     let result = result?;
+    let mut truncation = Vec::new();
+    if result.stdout_truncated {
+        truncation.push(json!({
+            "field": "stdout",
+            "retained_bytes": SERVICE_TEXT_FIELD_BYTE_CAP,
+        }));
+    }
+    if result.stderr_truncated {
+        truncation.push(json!({
+            "field": "stderr",
+            "retained_bytes": SERVICE_TEXT_FIELD_BYTE_CAP,
+        }));
+    }
+
     Ok(json!({
         "host": host_name,
         "container": params.container_id,
@@ -332,6 +351,8 @@ pub async fn exec_on_host(
         "stderr": result.stderr,
         "exit_code": result.exit_code,
         "ok": result.exit_code.map(|c| c == 0).unwrap_or(false),
+        "truncated": !truncation.is_empty(),
+        "truncation": truncation,
     }))
 }
 
@@ -371,16 +392,19 @@ async fn exec_inner(
     };
     let start_result = client.start_exec(&exec_id, Some(start_opts)).await?;
 
-    let (mut stdout_parts, mut stderr_parts): (Vec<String>, Vec<String>) = (vec![], vec![]);
+    let (mut stdout, mut stderr) = (String::new(), String::new());
+    let (mut stdout_truncated, mut stderr_truncated) = (false, false);
     if let StartExecResults::Attached { mut output, .. } = start_result {
         use bollard::container::LogOutput;
         while let Some(frame) = output.next().await {
             match frame? {
                 LogOutput::StdOut { message } => {
-                    stdout_parts.push(String::from_utf8_lossy(&message).into_owned());
+                    stdout_truncated |=
+                        append_lossy_bounded(&mut stdout, &message, SERVICE_TEXT_FIELD_BYTE_CAP);
                 }
                 LogOutput::StdErr { message } => {
-                    stderr_parts.push(String::from_utf8_lossy(&message).into_owned());
+                    stderr_truncated |=
+                        append_lossy_bounded(&mut stderr, &message, SERVICE_TEXT_FIELD_BYTE_CAP);
                 }
                 _ => {}
             }
@@ -392,9 +416,11 @@ async fn exec_inner(
     let exit_code = inspect.exit_code;
 
     Ok(ExecResult {
-        stdout: stdout_parts.join(""),
-        stderr: stderr_parts.join(""),
+        stdout,
+        stderr,
         exit_code,
+        stdout_truncated,
+        stderr_truncated,
     })
 }
 

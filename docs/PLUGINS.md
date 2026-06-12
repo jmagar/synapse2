@@ -248,16 +248,6 @@ Every Rust server with a Claude plugin should expose:
 
 Advisory failures are non-blocking local conditions such as missing `.env` files when process env already supplies values, occupied MCP ports, optional startup proofs, or model prewarm. Blocking failures are prerequisites required for the plugin to function, such as missing appdata directories, missing required upstream credentials, or invalid OAuth/auth configuration.
 
-Use `scripts/check-plugin-hook-contract.py` to audit the cross-repo standard:
-
-```bash
-# Static hook/delegation checks for all known Rust servers.
-scripts/check-plugin-hook-contract.py
-
-# Also run each binary's `setup plugin-hook --no-repair` JSON contract.
-scripts/check-plugin-hook-contract.py --execute
-```
-
 ## Version And Release Sync
 
 Keep version and metadata synchronized across:
@@ -290,7 +280,7 @@ When creating a real server from the template:
 7. Update shared skill docs for the actual action surface.
 8. Replace Codex `defaultPrompt` entries with realistic prompts.
 9. Update Gemini `description`, `settings`, and `contextFileName` if needed.
-10. Run `just validate-plugin`, plugin contract tests, and `scripts/check-plugin-hook-contract.py` before release.
+10. Run `just validate-plugin` and plugin contract tests before release.
 
 ## Required Tests
 

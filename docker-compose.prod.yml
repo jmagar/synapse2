@@ -1,15 +1,12 @@
 # =============================================================================
 # docker-compose.prod.yml — Production deployment template
 #
-# TEMPLATE: Replace all occurrences of "example" with your service name.
-#           Replace all occurrences of "EXAMPLE" with your service name in caps.
+# Synapse2 production compose template.
 #
-# Key substitutions:
-#   "example-mcp"          -> your Docker service/container name
-#   "example-mcp-data"     -> your Docker volume name
-#   "ghcr.io/.../example"  -> your published Docker image path
-#   port 40080             -> your service's MCP port
-#   EXAMPLE_*              -> your env var prefix
+# Authentication is validated by the binary. For bearer deployments, set
+# SYNAPSE_MCP_TOKEN in .env. For OAuth-only deployments, set
+# SYNAPSE_MCP_AUTH_MODE=oauth plus the OAuth variables and leave
+# SYNAPSE_MCP_TOKEN unset.
 # =============================================================================
 
 name: synapse2
@@ -42,7 +39,7 @@ services:
     environment:
       SYNAPSE_MCP_HOST: 0.0.0.0
       SYNAPSE_MCP_PORT: "40080"
-      SYNAPSE_MCP_TOKEN: "${SYNAPSE_MCP_TOKEN:?set SYNAPSE_MCP_TOKEN or configure OAuth explicitly}"
+      SYNAPSE_MCP_TOKEN: "${SYNAPSE_MCP_TOKEN:-}"
     ports:
       - "${SYNAPSE_MCP_HOST_PORT:-40080}:40080/tcp"
     volumes:

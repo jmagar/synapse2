@@ -14,7 +14,20 @@ async fn request_json(
     path: &str,
     body: Option<Value>,
 ) -> (StatusCode, Value) {
+    request_json_with_auth(app, method, path, body, None).await
+}
+
+async fn request_json_with_auth(
+    app: axum::Router,
+    method: Method,
+    path: &str,
+    body: Option<Value>,
+    bearer_token: Option<&str>,
+) -> (StatusCode, Value) {
     let mut builder = Request::builder().method(method).uri(path);
+    if let Some(token) = bearer_token {
+        builder = builder.header(header::AUTHORIZATION, format!("Bearer {token}"));
+    }
     let request = if let Some(body) = body {
         builder = builder.header(header::CONTENT_TYPE, "application/json");
         builder.body(Body::from(body.to_string())).unwrap()
@@ -57,6 +70,59 @@ async fn rest_scout_nodes_works_without_auth_on_loopback_state() {
 
     assert_eq!(status, StatusCode::OK);
     assert!(body["hosts"].is_array());
+}
+
+#[tokio::test]
+async fn mounted_rest_read_scoped_dotted_actions_pass_scope_checks() {
+    let app = server::router(synapse2::testing::bearer_state("read-token"));
+
+    let (status, body) = request_json_with_auth(
+        app.clone(),
+        Method::POST,
+        "/v1/synapse2",
+        Some(json!({"action": "scout.nodes", "params": {}})),
+        Some("read-token"),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert!(body["hosts"].is_array());
+
+    let (status, body) = request_json_with_auth(
+        app,
+        Method::POST,
+        "/v1/synapse2",
+        Some(json!({"action": "flux.docker.info", "params": {}})),
+        Some("read-token"),
+    )
+    .await;
+    assert_ne!(
+        status,
+        StatusCode::FORBIDDEN,
+        "flux.docker.info should pass REST scope checks; body={body}"
+    );
+}
+
+#[tokio::test]
+async fn mounted_rest_dotted_write_actions_require_write_scope() {
+    let app = server::router(synapse2::testing::bearer_state("read-token"));
+    let (status, body) = request_json_with_auth(
+        app,
+        Method::POST,
+        "/v1/synapse2",
+        Some(json!({
+            "action": "flux.docker.prune",
+            "params": {
+                "host": "local",
+                "prune_target": "images",
+                "force": true
+            }
+        })),
+        Some("read-token"),
+    )
+    .await;
+
+    assert_eq!(status, StatusCode::FORBIDDEN);
+    assert!(body["error"].as_str().unwrap().contains("synapse:write"));
 }
 
 #[tokio::test]

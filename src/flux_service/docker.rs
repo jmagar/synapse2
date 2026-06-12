@@ -38,6 +38,7 @@ use futures_util::StreamExt;
 use serde_json::{json, Map, Value};
 
 use crate::docker_client::{ContainerOps, ImageOps, NetworkOps, SystemOps, VolumeOps};
+use crate::runtime_budget::SERVICE_PROGRESS_ITEM_CAP;
 
 use super::host::HostExec;
 
@@ -164,16 +165,33 @@ pub async fn pull_on_host(
     };
     let mut stream = client.pull_image(Some(opts));
     let mut frames: Vec<Value> = Vec::new();
+    let mut progress_truncated = false;
+    let mut total_events: usize = 0;
     while let Some(item) = stream.next().await {
         let info = item?;
-        frames.push(serde_json::to_value(&info).unwrap_or(Value::Null));
+        total_events += 1;
+        if frames.len() < SERVICE_PROGRESS_ITEM_CAP {
+            frames.push(serde_json::to_value(&info).unwrap_or(Value::Null));
+        } else {
+            progress_truncated = true;
+        }
     }
     Ok(json!({
         "host": host_name,
         "image": image,
         "pulled": true,
-        "events": frames.len(),
+        "events": total_events,
         "progress": frames,
+        "truncated": progress_truncated,
+        "truncation": if progress_truncated {
+            json!([{
+                "field": "progress",
+                "original_items": total_events,
+                "retained_items": SERVICE_PROGRESS_ITEM_CAP,
+            }])
+        } else {
+            json!([])
+        },
     }))
 }
 

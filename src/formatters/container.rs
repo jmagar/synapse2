@@ -56,7 +56,7 @@ pub fn render_container_list_markdown(data: &Value) -> String {
     let available = data
         .get("available")
         .and_then(|v| v.as_bool())
-        .unwrap_or(false);
+        .unwrap_or(true);
 
     if !available {
         let error = data
@@ -151,7 +151,7 @@ pub fn render_container_inspect_markdown(data: &Value) -> String {
     let available = data
         .get("available")
         .and_then(|v| v.as_bool())
-        .unwrap_or(false);
+        .unwrap_or(true);
 
     if !available {
         let error = data
@@ -312,7 +312,7 @@ pub fn render_container_logs_markdown(data: &Value) -> String {
     let available = data
         .get("available")
         .and_then(|v| v.as_bool())
-        .unwrap_or(false);
+        .unwrap_or(true);
 
     if !available {
         let error = data
@@ -327,20 +327,44 @@ pub fn render_container_logs_markdown(data: &Value) -> String {
         .get("container")
         .and_then(|v| v.as_str())
         .unwrap_or("—");
-    let stdout_raw = data.get("stdout").and_then(|v| v.as_str()).unwrap_or("");
+    let host = data.get("host").and_then(|v| v.as_str());
 
-    // Filter empty lines
-    let log_lines: Vec<&str> = stdout_raw.lines().filter(|l| !l.is_empty()).collect();
+    let log_lines: Vec<String> = if let Some(lines) = data.get("lines").and_then(|v| v.as_array()) {
+        lines
+            .iter()
+            .filter_map(|line| line.as_str())
+            .filter(|line| !line.is_empty())
+            .map(ToOwned::to_owned)
+            .collect()
+    } else {
+        data.get("stdout")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .lines()
+            .filter(|line| !line.is_empty())
+            .map(ToOwned::to_owned)
+            .collect()
+    };
 
     if log_lines.is_empty() {
         return format!("Container Logs for {container}\n\nNo logs found.");
     }
 
-    let title = format!("Container Logs for {container}");
+    let title = match host {
+        Some(host) => format!("Container Logs for {container} ({host})"),
+        None => format!("Container Logs for {container}"),
+    };
     let timestamp = format_timestamp();
+    let truncated = data
+        .get("truncated")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false);
     let summary = format!(
-        "Lines returned: {} | truncated: no | follow: no",
-        log_lines.len()
+        "Lines returned: {} | truncated: {} | follow: no",
+        data.get("count")
+            .and_then(|v| v.as_u64())
+            .unwrap_or(log_lines.len() as u64),
+        if truncated { "yes" } else { "no" }
     );
 
     let log_output = if log_lines.len() <= PREVIEW_THRESHOLD {

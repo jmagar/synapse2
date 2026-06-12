@@ -32,7 +32,6 @@
 mod tests;
 
 use std::path::Path;
-use std::process::Command;
 use std::time::Duration;
 
 use std::sync::Arc;
@@ -88,32 +87,28 @@ pub async fn exec(
     let arg_strs: Vec<&str> = args.iter().map(|s| s.as_str()).collect();
 
     if is_local_host(host) {
-        exec_local(host, command, &arg_strs, path)
+        exec_local(host, command, &arg_strs, path).await
     } else {
         exec_remote(host, executor, command, &arg_strs).await
     }
 }
 
-fn exec_local(
+async fn exec_local(
     host: &HostConfig,
     command: &str,
     args: &[&str],
     path: Option<&str>,
 ) -> Result<Value> {
-    let mut cmd = Command::new(command);
-    cmd.args(args);
-    if let Some(p) = path {
-        cmd.current_dir(Path::new(p));
-    }
-    let output = cmd.output()?;
+    let output =
+        crate::runtime_budget::run_local_command(command, args, path.map(Path::new)).await?;
     Ok(json!({
         "host": host.name,
         "command": command,
         "args": args,
         "path": path,
-        "exit_code": output.status.code(),
-        "stdout": String::from_utf8_lossy(&output.stdout),
-        "stderr": String::from_utf8_lossy(&output.stderr),
+        "exit_code": output.exit_code,
+        "stdout": output.stdout,
+        "stderr": output.stderr,
     }))
 }
 
@@ -193,7 +188,7 @@ pub async fn emit(
 
             let fut = async {
                 if is_local_host(&host) {
-                    exec_local_fanout(&host, &cmd, &arg_refs, None)
+                    exec_local_fanout(&host, &cmd, &arg_refs, None).await
                 } else {
                     exec_remote_fanout(&host, ex.as_ref(), &cmd, &arg_refs).await
                 }
@@ -235,22 +230,18 @@ pub async fn emit(
     }))
 }
 
-fn exec_local_fanout(
+async fn exec_local_fanout(
     _host: &HostConfig,
     command: &str,
     args: &[&str],
     path: Option<&str>,
 ) -> Result<Value> {
-    let mut cmd = Command::new(command);
-    cmd.args(args);
-    if let Some(p) = path {
-        cmd.current_dir(p);
-    }
-    let output = cmd.output()?;
+    let output =
+        crate::runtime_budget::run_local_command(command, args, path.map(Path::new)).await?;
     Ok(json!({
-        "exit_code": output.status.code(),
-        "stdout": String::from_utf8_lossy(&output.stdout),
-        "stderr": String::from_utf8_lossy(&output.stderr),
+        "exit_code": output.exit_code,
+        "stdout": output.stdout,
+        "stderr": output.stderr,
     }))
 }
 
@@ -302,17 +293,21 @@ pub async fn beam(
     let src_arg = scp_arg(source_host, source_path);
     let dst_arg = scp_arg(dest_host, dest_path);
 
-    let output = Command::new("scp")
-        .arg("-q") // quiet
-        .arg("-o")
-        .arg("StrictHostKeyChecking=yes")
-        .arg(&src_arg)
-        .arg(&dst_arg)
-        .output()?;
+    let output = crate::runtime_budget::run_local_command(
+        "scp",
+        &[
+            "-q",
+            "-o",
+            "StrictHostKeyChecking=yes",
+            src_arg.as_str(),
+            dst_arg.as_str(),
+        ],
+        None,
+    )
+    .await?;
 
-    if !output.status.success() {
-        let stderr = String::from_utf8_lossy(&output.stderr);
-        bail!("beam: scp failed: {stderr}");
+    if !output.success() {
+        bail!("beam: scp failed: {}", output.stderr);
     }
 
     Ok(json!({

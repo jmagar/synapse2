@@ -1,6 +1,6 @@
 use super::{
-    is_read_only, required_scope_for_action, scopes_satisfy, ActionSpec, ActionTransport,
-    SynapseAction, ACTION_SPECS, READ_SCOPE, WRITE_SCOPE,
+    is_read_only, required_scope_for_action, required_scope_for_parsed_action, scopes_satisfy,
+    ActionSpec, ActionTransport, SynapseAction, ACTION_SPECS, DENY_SCOPE, READ_SCOPE, WRITE_SCOPE,
 };
 use serde_json::json;
 
@@ -70,6 +70,51 @@ fn parses_flux_actions() {
         }
         other => panic!("expected FluxContainer, got {other:?}"),
     }
+}
+
+#[test]
+fn parsed_flux_subactions_require_write_for_mutating_ops() {
+    let docker_info =
+        SynapseAction::from_flux_args(&json!({"action":"docker","subaction":"info"})).unwrap();
+    assert_eq!(
+        required_scope_for_parsed_action(&docker_info),
+        Some(READ_SCOPE)
+    );
+
+    let docker_prune =
+        SynapseAction::from_flux_args(&json!({"action":"docker","subaction":"prune"})).unwrap();
+    assert_eq!(
+        required_scope_for_parsed_action(&docker_prune),
+        Some(WRITE_SCOPE)
+    );
+
+    let container_stop =
+        SynapseAction::from_flux_args(&json!({"action":"container","subaction":"stop"})).unwrap();
+    assert_eq!(
+        required_scope_for_parsed_action(&container_stop),
+        Some(WRITE_SCOPE)
+    );
+
+    let compose_status =
+        SynapseAction::from_flux_args(&json!({"action":"compose","subaction":"status"})).unwrap();
+    assert_eq!(
+        required_scope_for_parsed_action(&compose_status),
+        Some(READ_SCOPE)
+    );
+
+    let compose_build =
+        SynapseAction::from_flux_args(&json!({"action":"compose","subaction":"build"})).unwrap();
+    assert_eq!(
+        required_scope_for_parsed_action(&compose_build),
+        Some(WRITE_SCOPE)
+    );
+}
+
+#[test]
+fn parsed_flux_unknown_subactions_fail_closed_for_scope() {
+    let unknown =
+        SynapseAction::from_flux_args(&json!({"action":"docker","subaction":"future"})).unwrap();
+    assert_eq!(required_scope_for_parsed_action(&unknown), Some(DENY_SCOPE));
 }
 
 #[test]

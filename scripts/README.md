@@ -14,7 +14,6 @@ Maintenance and automation scripts for the template. Shell scripts are written f
 | `check-coupled-files.sh` | Warn when files that normally change together drift. |
 | `check-dependency-updates.sh` | Report lockfile-compatible and latest dependency updates. |
 | `check-file-size.sh` | Pre-commit source file size budget. |
-| `check-plugin-hook-contract.py` | Audit plugin setup hook contract across Rust MCP servers. |
 | `check-runtime-current.sh` | Detect stale Docker/systemd runtimes. |
 | `check-openapi.py` | Generate/check `docs/generated/openapi.json` for the REST API surface. |
 | `check-schema-docs.py` | Generate/check `docs/MCP_SCHEMA.md` and action docs. |
@@ -84,7 +83,7 @@ scripts/check-coupled-files.sh origin/main HEAD
 just coupled-files-check
 ```
 
-CI-oriented guard for files that usually change together, such as script changes with `scripts/README.md`, schema changes with `docs/MCP_SCHEMA.md`, and automation changes with docs.
+CI-oriented guard for files that usually change together, such as script changes with `scripts/README.md`, schema changes with `docs/MCP_SCHEMA.md`, and automation changes with docs. Schema changes may omit `docs/MCP_SCHEMA.md` when `scripts/check-schema-docs.py --check` proves the generated docs are already current.
 
 ### `check-dependency-updates.sh`
 
@@ -126,15 +125,6 @@ just scaffold-contract-check
 ```
 
 Validates `docs/contracts/scaffold-intent.schema.json` plus checked-in examples under `docs/contracts/examples/`. This is a targeted validator, not a full JSON Schema implementation, so it can run in fresh checkouts without extra Python packages.
-
-### `check-plugin-hook-contract.py`
-
-```bash
-python3 scripts/check-plugin-hook-contract.py
-python3 scripts/check-plugin-hook-contract.py --execute
-```
-
-Audits plugin setup hooks across known Rust MCP servers. Without `--execute`, it is a static contract check. With `--execute`, it runs each binary setup command via Cargo.
 
 ### `check-runtime-current.sh`
 

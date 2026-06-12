@@ -109,8 +109,15 @@ fn claude_hooks_delegate_to_plugin_setup_script() {
 fn plugin_setup_delegates_to_binary_owned_hook_command() {
     let setup = read("plugins/synapse2/hooks/plugin-setup.sh");
     assert!(
-        setup.contains("synapse setup plugin-hook"),
-        "plugin setup should delegate to the binary-owned hook command"
+        setup.contains("\"${synapse_bin}\" setup plugin-hook"),
+        "plugin setup should delegate to the verified bundled binary path"
+    );
+    assert!(
+        setup
+            .find("synapse_bin=\"$(ensure_synapse2_binary)\"")
+            .unwrap()
+            < setup.find("export_if_set SYNAPSE_MCP_TOKEN").unwrap(),
+        "plugin setup should verify the bundled binary before exporting secrets"
     );
     assert!(
         !setup.contains("systemctl --user"),

@@ -588,6 +588,23 @@ fn container_logs_preview_for_long_output() {
     assert!(output.contains("last 5"), "should show last 5 lines");
 }
 
+#[test]
+fn container_logs_render_current_service_payload_shape() {
+    let data = json!({
+        "host": "dookie",
+        "container": "nginx",
+        "count": 2,
+        "lines": ["ready", "served request"],
+    });
+
+    let output = render_container_logs_markdown(&data);
+
+    assert!(output.contains("Container Logs for nginx (dookie)"));
+    assert!(output.contains("Lines returned: 2 | truncated: no"));
+    assert!(output.contains("ready"));
+    assert!(output.contains("served request"));
+}
+
 // ──────────────────────────────────────────────
 // Host status
 // ──────────────────────────────────────────────
@@ -718,6 +735,24 @@ fn scout_syslog_basic() {
     assert!(output.contains("Lines requested: 50 | Returned: 2"));
     assert!(output.contains("As of (UTC):"));
     assert!(output.contains("sshd"));
+}
+
+#[test]
+fn scout_syslog_renders_current_service_payload_shape() {
+    let data = json!({
+        "host": "squirts",
+        "subaction": "syslog",
+        "lines": 100,
+        "grep": "sshd",
+        "output": "Jun 12 10:00:00 squirts sshd: Accepted publickey\nJun 12 10:00:01 squirts sshd: session opened"
+    });
+
+    let output = render_scout_syslog_markdown(&data);
+
+    assert!(output.starts_with("Syslog: squirts"));
+    assert!(output.contains("Lines requested: 100 | Returned: 2 | truncated: no | Filter: sshd"));
+    assert!(output.contains("Accepted publickey"));
+    assert!(output.contains("session opened"));
 }
 
 #[test]

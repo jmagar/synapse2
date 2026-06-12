@@ -1,13 +1,13 @@
 {
   "openapi": "3.1.0",
   "info": {
-    "title": "Example MCP REST API",
+    "title": "Synapse2 REST API",
     "version": "0.5.2",
-    "description": "Generated OpenAPI schema for rmcp-template's REST surface. TEMPLATE: rename Example identifiers and action schemas when adapting. Auth modes: loopback/trusted-gateway deployments may have no local auth; mounted bearer mode uses EXAMPLE_MCP_TOKEN; OAuth mode uses bearer JWTs. REST actions require their action-specific scopes when auth is mounted."
+    "description": "Generated OpenAPI schema for Synapse2's REST surface. Auth modes: loopback/trusted-gateway deployments may have no local auth; mounted bearer mode uses SYNAPSE_MCP_TOKEN; OAuth mode uses bearer JWTs. REST actions require their action-specific scopes when auth is mounted."
   },
   "servers": [
     {
-      "url": "http://localhost:3100",
+      "url": "http://localhost:40080",
       "description": "Default local development server"
     }
   ],
@@ -99,14 +99,14 @@
         }
       }
     },
-    "/v1/example": {
+    "/v1/synapse2": {
       "post": {
         "tags": [
           "actions"
         ],
         "summary": "Dispatch a REST action",
-        "description": "Thin REST shim over the shared service layer. MCP-only actions are not exposed here. Current REST actions: help, docker, container, host, compose, nodes, peek, find, ps, df, delta, exec, emit, beam, zfs, logs. When auth is mounted, each action requires its declared scope; example:write satisfies example:read.",
-        "operationId": "dispatchExampleAction",
+        "description": "Thin REST shim over the shared service layer. MCP-only actions are not exposed here. Current REST actions: help, flux.docker.info, flux.docker.df, flux.docker.images, flux.docker.networks, flux.docker.volumes, flux.docker.pull, flux.docker.build, flux.docker.rmi, flux.docker.prune, flux.container.list, scout.nodes, scout.peek, scout.exec. When auth is mounted, each action requires its declared scope; synapse:write satisfies synapse:read.",
+        "operationId": "dispatchSynapse2Action",
         "security": [
           {
             "BearerAuth": []
@@ -127,94 +127,96 @@
                     "params": {}
                   }
                 },
-                "docker": {
+                "flux.docker.info": {
                   "value": {
-                    "action": "docker",
+                    "action": "flux.docker.info",
+                    "params": {
+                      "host": "myhost"
+                    }
+                  }
+                },
+                "flux.docker.df": {
+                  "value": {
+                    "action": "flux.docker.df",
                     "params": {}
                   }
                 },
-                "container": {
+                "flux.docker.images": {
                   "value": {
-                    "action": "container",
+                    "action": "flux.docker.images",
                     "params": {}
                   }
                 },
-                "host": {
+                "flux.docker.networks": {
                   "value": {
-                    "action": "host",
+                    "action": "flux.docker.networks",
                     "params": {}
                   }
                 },
-                "compose": {
+                "flux.docker.volumes": {
                   "value": {
-                    "action": "compose",
+                    "action": "flux.docker.volumes",
                     "params": {}
                   }
                 },
-                "nodes": {
+                "flux.docker.pull": {
                   "value": {
-                    "action": "nodes",
+                    "action": "flux.docker.pull",
+                    "params": {
+                      "host": "myhost",
+                      "image": "nginx:latest"
+                    }
+                  }
+                },
+                "flux.docker.build": {
+                  "value": {
+                    "action": "flux.docker.build",
                     "params": {}
                   }
                 },
-                "peek": {
+                "flux.docker.rmi": {
                   "value": {
-                    "action": "peek",
+                    "action": "flux.docker.rmi",
                     "params": {}
                   }
                 },
-                "find": {
+                "flux.docker.prune": {
                   "value": {
-                    "action": "find",
+                    "action": "flux.docker.prune",
                     "params": {}
                   }
                 },
-                "ps": {
+                "flux.container.list": {
                   "value": {
-                    "action": "ps",
+                    "action": "flux.container.list",
+                    "params": {
+                      "state": "running"
+                    }
+                  }
+                },
+                "scout.nodes": {
+                  "value": {
+                    "action": "scout.nodes",
                     "params": {}
                   }
                 },
-                "df": {
+                "scout.peek": {
                   "value": {
-                    "action": "df",
-                    "params": {}
+                    "action": "scout.peek",
+                    "params": {
+                      "host": "myhost",
+                      "path": "/etc/hostname"
+                    }
                   }
                 },
-                "delta": {
+                "scout.exec": {
                   "value": {
-                    "action": "delta",
-                    "params": {}
-                  }
-                },
-                "exec": {
-                  "value": {
-                    "action": "exec",
-                    "params": {}
-                  }
-                },
-                "emit": {
-                  "value": {
-                    "action": "emit",
-                    "params": {}
-                  }
-                },
-                "beam": {
-                  "value": {
-                    "action": "beam",
-                    "params": {}
-                  }
-                },
-                "zfs": {
-                  "value": {
-                    "action": "zfs",
-                    "params": {}
-                  }
-                },
-                "logs": {
-                  "value": {
-                    "action": "logs",
-                    "params": {}
+                    "action": "scout.exec",
+                    "params": {
+                      "host": "myhost",
+                      "path": "/tmp",
+                      "command": "hostname"
+                    }
                   }
                 }
               }
@@ -262,23 +264,21 @@
         "type": "string",
         "enum": [
           "help",
-          "docker",
-          "container",
-          "host",
-          "compose",
-          "nodes",
-          "peek",
-          "find",
-          "ps",
-          "df",
-          "delta",
-          "exec",
-          "emit",
-          "beam",
-          "zfs",
-          "logs"
+          "flux.docker.info",
+          "flux.docker.df",
+          "flux.docker.images",
+          "flux.docker.networks",
+          "flux.docker.volumes",
+          "flux.docker.pull",
+          "flux.docker.build",
+          "flux.docker.rmi",
+          "flux.docker.prune",
+          "flux.container.list",
+          "scout.nodes",
+          "scout.peek",
+          "scout.exec"
         ],
-        "description": "REST-capable action names from src/actions.rs."
+        "description": "REST-capable action names served by POST /v1/synapse2."
       },
       "ActionRequest": {
         "type": "object",
@@ -292,60 +292,15 @@
           },
           "params": {
             "type": "object",
-            "description": "Action-specific parameters. greet.name is optional; echo.message is required.",
+            "description": "Action-specific parameters for the selected Synapse2 REST action.",
             "additionalProperties": true,
             "default": {}
           }
         }
       },
       "ActionResponse": {
-        "oneOf": [
-          {
-            "$ref": "#/components/schemas/GreetResponse"
-          },
-          {
-            "$ref": "#/components/schemas/EchoResponse"
-          },
-          {
-            "$ref": "#/components/schemas/StatusResponse"
-          },
-          {
-            "$ref": "#/components/schemas/HelpResponse"
-          },
-          {
-            "$ref": "#/components/schemas/RestTruncationResponse"
-          }
-        ]
-      },
-      "GreetResponse": {
         "type": "object",
-        "required": [
-          "greeting",
-          "target"
-        ],
-        "properties": {
-          "greeting": {
-            "type": "string"
-          },
-          "target": {
-            "type": "string"
-          },
-          "server": {
-            "type": "string"
-          }
-        },
-        "additionalProperties": true
-      },
-      "EchoResponse": {
-        "type": "object",
-        "required": [
-          "echo"
-        ],
-        "properties": {
-          "echo": {
-            "type": "string"
-          }
-        },
+        "description": "Action result. Shape depends on the requested action.",
         "additionalProperties": true
       },
       "StatusResponse": {
@@ -503,6 +458,22 @@
     "source": "scripts/check-openapi.py",
     "action_metadata": "src/actions.rs",
     "rest_actions": [
+      "help",
+      "flux.docker.info",
+      "flux.docker.df",
+      "flux.docker.images",
+      "flux.docker.networks",
+      "flux.docker.volumes",
+      "flux.docker.pull",
+      "flux.docker.build",
+      "flux.docker.rmi",
+      "flux.docker.prune",
+      "flux.container.list",
+      "scout.nodes",
+      "scout.peek",
+      "scout.exec"
+    ],
+    "mcp_actions": [
       "help",
       "docker",
       "container",
