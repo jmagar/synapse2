@@ -6,6 +6,8 @@ use crate::synapse::HostConfig;
 use async_trait::async_trait;
 use std::sync::{Arc, Mutex};
 
+type RecordedSshCalls = Arc<Mutex<Vec<(String, Vec<String>)>>>;
+
 // ─── validate_safe_path tests (security-critical) ────────────────────────────
 
 #[test]
@@ -64,7 +66,7 @@ async fn peek_local_file_reads_only_preview_bytes() {
 async fn peek_remote_file_uses_bounded_head_read() {
     #[derive(Clone, Default)]
     struct RecordingExec {
-        calls: Arc<Mutex<Vec<(String, Vec<String>)>>>,
+        calls: RecordedSshCalls,
     }
 
     #[async_trait]
