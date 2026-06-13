@@ -23,6 +23,14 @@ fn read_scope_satisfies_read_requirement() {
 }
 
 #[test]
+fn write_scope_satisfies_read_when_mixed_with_unrelated_scopes() {
+    assert!(scope_satisfied(
+        &scopes(&["profile", WRITE_SCOPE, "other:scope"]),
+        READ_SCOPE
+    ));
+}
+
+#[test]
 fn write_scope_satisfies_read_requirement() {
     assert!(
         scope_satisfied(&scopes(&[WRITE_SCOPE]), READ_SCOPE),
@@ -61,6 +69,102 @@ fn parsed_destructive_flux_subactions_require_write_scope() {
     }))
     .unwrap();
     assert_eq!(required_scope_for_parsed_action(&action), Some(WRITE_SCOPE));
+}
+
+#[test]
+fn parsed_high_risk_subactions_have_expected_scopes() {
+    let cases = [
+        (
+            json!({"action": "container", "subaction": "list"}),
+            READ_SCOPE,
+        ),
+        (
+            json!({"action": "container", "subaction": "exec"}),
+            WRITE_SCOPE,
+        ),
+        (
+            json!({"action": "container", "subaction": "recreate"}),
+            WRITE_SCOPE,
+        ),
+        (
+            json!({
+                "action": "compose",
+                "subaction": "logs",
+                "host": "dookie",
+                "project": "stack"
+            }),
+            READ_SCOPE,
+        ),
+        (
+            json!({
+                "action": "compose",
+                "subaction": "down",
+                "host": "dookie",
+                "project": "stack"
+            }),
+            WRITE_SCOPE,
+        ),
+        (
+            json!({
+                "action": "compose",
+                "subaction": "restart",
+                "host": "dookie",
+                "project": "stack"
+            }),
+            WRITE_SCOPE,
+        ),
+    ];
+
+    for (args, expected_scope) in cases {
+        let action = SynapseAction::from_flux_args(&args).unwrap();
+        assert_eq!(
+            required_scope_for_parsed_action(&action),
+            Some(expected_scope),
+            "unexpected scope for {args}"
+        );
+    }
+
+    let scout_cases = [
+        (
+            json!({"action": "logs", "host": "dookie", "subaction": "journal"}),
+            READ_SCOPE,
+        ),
+        (
+            json!({"action": "zfs", "host": "dookie", "subaction": "snapshots"}),
+            READ_SCOPE,
+        ),
+        (
+            json!({"action": "exec", "host": "dookie", "command": "hostname"}),
+            WRITE_SCOPE,
+        ),
+        (
+            json!({
+                "action": "emit",
+                "targets": [{"host": "dookie"}],
+                "command": "hostname"
+            }),
+            WRITE_SCOPE,
+        ),
+        (
+            json!({
+                "action": "beam",
+                "source_host": "dookie",
+                "source_path": "/tmp/a",
+                "dest_host": "tootie",
+                "dest_path": "/tmp/b"
+            }),
+            WRITE_SCOPE,
+        ),
+    ];
+
+    for (args, expected_scope) in scout_cases {
+        let action = SynapseAction::from_scout_args(&args).unwrap();
+        assert_eq!(
+            required_scope_for_parsed_action(&action),
+            Some(expected_scope),
+            "unexpected scope for {args}"
+        );
+    }
 }
 
 #[test]
@@ -148,6 +252,27 @@ fn parse_mcp_action_maps_flux_and_scout_validation_errors() {
     )
     .expect_err("unknown action should map to invalid params");
     assert!(error.message.contains("unknown synapse2 action"));
+}
+
+#[test]
+fn parse_mcp_action_rejects_missing_and_wrong_typed_subactions() {
+    let missing = parse_mcp_action("flux", &json!({"action": "container"}))
+        .expect_err("container action without subaction should be invalid");
+    assert!(missing.message.contains("subaction"));
+
+    let wrong_type = parse_mcp_action(
+        "flux",
+        &json!({
+            "action": "host",
+            "subaction": 42
+        }),
+    )
+    .expect_err("numeric subaction should be invalid");
+    assert!(wrong_type.message.contains("subaction"));
+
+    let scout_missing = parse_mcp_action("scout", &json!({"action": "logs"}))
+        .expect_err("logs action without required fields should be invalid");
+    assert!(scout_missing.message.contains("host"));
 }
 
 #[test]

@@ -192,6 +192,13 @@ fn test_host(name: &str) -> HostConfig {
     }
 }
 
+fn local_test_host(name: &str) -> HostConfig {
+    let mut host = test_host(name);
+    host.host = "localhost".to_owned();
+    host.protocol = HostProtocol::Local;
+    host
+}
+
 fn compose_host(name: &str) -> HostConfig {
     let mut host = test_host(name);
     host.compose_search_paths = vec!["/compose".to_owned()];
@@ -542,6 +549,103 @@ async fn container_exec_confirmation_decline_blocks_before_host_resolution() {
         .unwrap_err();
 
     assert!(err.to_string().contains("declined"));
+}
+
+#[tokio::test]
+async fn container_recreate_without_host_reports_not_found_before_confirmation() {
+    let flux = flux_with_hosts(Vec::new());
+    let params = container_lifecycle::RecreateParams { pull: true };
+
+    let err = flux
+        .container_recreate(None, "container-id", params, &DenyConfirmer)
+        .await
+        .unwrap_err();
+
+    assert!(err.to_string().contains("not found on any host"));
+}
+
+#[tokio::test]
+async fn container_find_host_ops_aggregate_empty_host_errors_consistently() {
+    let flux = flux_with_hosts(Vec::new());
+
+    let inspect = flux
+        .container_inspect(None, "abc", false)
+        .await
+        .unwrap_err();
+    let top = flux.container_top(None, "abc").await.unwrap_err();
+    let logs = flux
+        .container_logs(
+            None,
+            "abc",
+            LogOptions {
+                lines: 10,
+                since: None,
+                until: None,
+                grep: None,
+                stream: "both".to_owned(),
+            },
+        )
+        .await
+        .unwrap_err();
+    let pull = flux.container_pull(None, "abc").await.unwrap_err();
+
+    for err in [inspect, top, logs, pull] {
+        let text = err.to_string();
+        assert!(text.contains("container abc not found on any host"));
+    }
+}
+
+#[tokio::test]
+async fn host_driver_named_fanout_ops_reject_unknown_host() {
+    let flux = flux_with_hosts(vec![test_host("alpha")]);
+
+    let status = flux.host_status(Some("missing")).await.unwrap_err();
+    let info = flux.host_info(Some("missing")).await.unwrap_err();
+    let uptime = flux.host_uptime(Some("missing")).await.unwrap_err();
+    let resources = flux.host_resources(Some("missing")).await.unwrap_err();
+    let network = flux.host_network(Some("missing")).await.unwrap_err();
+
+    for err in [status, info, uptime, resources, network] {
+        assert!(err.to_string().contains("unknown host"));
+    }
+}
+
+#[tokio::test]
+async fn host_driver_local_host_executes_non_docker_ops_through_local_seam() {
+    let flux = flux_with_hosts(vec![local_test_host("local")]);
+
+    let info = flux.host_info(Some("local")).await.unwrap();
+    let uptime = flux.host_uptime(Some("local")).await.unwrap();
+    let resources = flux.host_resources(Some("local")).await.unwrap();
+    let network = flux.host_network(Some("local")).await.unwrap();
+    let mounts = flux.host_mounts("local").await.unwrap();
+    let doctor = flux
+        .host_doctor(
+            "local",
+            vec![
+                "resources".to_owned(),
+                "network".to_owned(),
+                "processes".to_owned(),
+            ],
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(info["info"][0]["host"], "local");
+    assert!(info["info"][0]["info"]
+        .as_str()
+        .unwrap_or("")
+        .contains("Linux"));
+    assert_eq!(uptime["uptime"][0]["host"], "local");
+    assert_eq!(resources["resources"][0]["host"], "local");
+    assert_eq!(network["network"][0]["host"], "local");
+    assert_eq!(mounts["host"], "local");
+    assert!(mounts["mounts"]
+        .as_str()
+        .unwrap_or("")
+        .contains("Filesystem"));
+    assert_eq!(doctor["host"], "local");
+    assert_eq!(doctor["checks"].as_array().unwrap().len(), 3);
 }
 
 #[test]
