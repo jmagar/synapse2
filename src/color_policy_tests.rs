@@ -1,4 +1,4 @@
-use super::{install_color_choice, resolve, ColorChoice};
+use super::{ColorChoice, install_color_choice, resolve};
 
 #[test]
 fn explicit_color_choice_overrides_terminal_detection() {

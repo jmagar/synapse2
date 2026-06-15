@@ -32,7 +32,8 @@ pub struct Config {
 }
 
 /// MCP HTTP server configuration.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+// `Debug` is hand-written (below) to redact `api_token`; do not re-derive it.
+#[derive(Clone, Serialize, Deserialize)]
 #[serde(default)]
 pub struct McpConfig {
     /// Bind host (SYNAPSE_MCP_HOST). Default: `127.0.0.1` (loopback).
@@ -64,8 +65,38 @@ pub struct McpConfig {
     pub allowed_hosts: Vec<String>,
     /// Additional allowed CORS origins (comma-separated in env).
     pub allowed_origins: Vec<String>,
+    /// Maximum number of concurrent in-flight requests on `/mcp` and
+    /// `/v1/synapse2` (SYNAPSE_MCP_MAX_CONCURRENCY). Additional requests are
+    /// queued until a permit is available. Default: 50. Set to 0 to disable
+    /// the limit.
+    ///
+    /// This is a global concurrency cap across all connected clients — not a
+    /// per-client rate limit. It protects the SSH pool, Docker socket, and CPU
+    /// from request storms (e.g., a misbehaving MCP client sending large
+    /// scout emit fanouts in parallel).
+    #[serde(default = "default_max_concurrency")]
+    pub max_concurrency: usize,
     /// OAuth sub-config (nested under `[mcp.auth]` in config.toml).
     pub auth: AuthConfig,
+}
+
+impl std::fmt::Debug for McpConfig {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("McpConfig")
+            .field("host", &self.host)
+            .field("port", &self.port)
+            .field("server_name", &self.server_name)
+            .field("no_auth", &self.no_auth)
+            .field("trusted_gateway", &self.trusted_gateway)
+            .field("allow_destructive", &self.allow_destructive)
+            // Redact the static bearer token — never log secrets.
+            .field("api_token", &self.api_token.as_ref().map(|_| "[REDACTED]"))
+            .field("allowed_hosts", &self.allowed_hosts)
+            .field("allowed_origins", &self.allowed_origins)
+            .field("max_concurrency", &self.max_concurrency)
+            .field("auth", &self.auth)
+            .finish()
+    }
 }
 
 impl McpConfig {
@@ -93,12 +124,20 @@ impl McpConfig {
 }
 
 /// OAuth / JWT auth sub-config.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+///
+/// # Security: manual `Debug` impl
+///
+/// `google_client_secret` (and any other credential fields) must never appear
+/// in log output. The derived `Debug` would print them verbatim, so this type
+/// opts out of `#[derive(Debug)]` and implements it manually, redacting secret
+/// fields to `"[REDACTED]"`.
+#[derive(Clone, Serialize, Deserialize)]
 #[serde(default)]
 pub struct AuthConfig {
     pub mode: AuthMode,
     pub public_url: Option<String>,
     pub google_client_id: Option<String>,
+    /// SECURITY: never print this field — see manual `Debug` impl below.
     pub google_client_secret: Option<String>,
     pub admin_email: String,
     pub sqlite_path: String,
@@ -110,6 +149,37 @@ pub struct AuthConfig {
     pub authorize_rpm: u32,
     pub disable_static_token_with_oauth: bool,
     pub allowed_client_redirect_uris: Vec<String>,
+}
+
+impl std::fmt::Debug for AuthConfig {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("AuthConfig")
+            .field("mode", &self.mode)
+            .field("public_url", &self.public_url)
+            .field("google_client_id", &self.google_client_id)
+            // Redact credential fields — never log secrets.
+            .field(
+                "google_client_secret",
+                &self.google_client_secret.as_ref().map(|_| "[REDACTED]"),
+            )
+            .field("admin_email", &self.admin_email)
+            .field("sqlite_path", &self.sqlite_path)
+            .field("key_path", &self.key_path)
+            .field("access_token_ttl_secs", &self.access_token_ttl_secs)
+            .field("refresh_token_ttl_secs", &self.refresh_token_ttl_secs)
+            .field("auth_code_ttl_secs", &self.auth_code_ttl_secs)
+            .field("register_rpm", &self.register_rpm)
+            .field("authorize_rpm", &self.authorize_rpm)
+            .field(
+                "disable_static_token_with_oauth",
+                &self.disable_static_token_with_oauth,
+            )
+            .field(
+                "allowed_client_redirect_uris",
+                &self.allowed_client_redirect_uris,
+            )
+            .finish()
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq, Eq)]
@@ -132,6 +202,9 @@ fn default_mcp_port() -> u16 {
 }
 fn default_server_name() -> String {
     "synapse2".into()
+}
+fn default_max_concurrency() -> usize {
+    50
 }
 fn default_auth_sqlite_path() -> String {
     "/data/auth.db".into()
@@ -167,6 +240,7 @@ impl Default for McpConfig {
             api_token: None,
             allowed_hosts: Vec::new(),
             allowed_origins: Vec::new(),
+            max_concurrency: default_max_concurrency(),
             auth: AuthConfig::default(),
         }
     }
@@ -268,6 +342,10 @@ impl Config {
             "SYNAPSE_MCP_ALLOWED_ORIGINS",
             &mut config.mcp.allowed_origins,
         );
+        env_parse(
+            "SYNAPSE_MCP_MAX_CONCURRENCY",
+            &mut config.mcp.max_concurrency,
+        )?;
         env_opt_str("SYNAPSE_MCP_PUBLIC_URL", &mut config.mcp.auth.public_url);
         env_str(
             "SYNAPSE_MCP_AUTH_ADMIN_EMAIL",
@@ -314,10 +392,10 @@ impl Config {
             "SYNAPSE_MCP_AUTH_ALLOWED_REDIRECT_URIS",
             &mut config.mcp.auth.allowed_client_redirect_uris,
         );
-        if let Ok(v) = std::env::var("SYNAPSE_MCP_AUTH_MODE") {
-            if !v.is_empty() {
-                config.mcp.auth.mode = parse_auth_mode_value(&v)?;
-            }
+        if let Ok(v) = std::env::var("SYNAPSE_MCP_AUTH_MODE")
+            && !v.is_empty()
+        {
+            config.mcp.auth.mode = parse_auth_mode_value(&v)?;
         }
 
         Ok(config)

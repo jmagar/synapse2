@@ -3,16 +3,16 @@
 //! Both run via the `HostExec` seam (local or SSH) so they work on any
 //! configured host without spawning a shell.
 
-use anyhow::{bail, Result};
-use serde_json::{json, Value};
+use anyhow::{Result, bail};
+use serde_json::{Value, json};
 
 #[cfg(test)]
 #[path = "proc_tests.rs"]
 mod tests;
 
-use crate::flux_service::host::{is_local_host, HostExec, LocalExec, RemoteExec};
+use crate::flux_service::host::{HostExec, LocalExec, RemoteExec, is_local_host};
 use crate::ssh::SshExecutor;
-use crate::synapse::{validate_safe_path, HostConfig};
+use crate::synapse::{HostConfig, validate_safe_path};
 
 /// Valid sort fields for `ps --sort`.
 const VALID_PS_SORTS: &[&str] = &["cpu", "mem", "pid", "time"];

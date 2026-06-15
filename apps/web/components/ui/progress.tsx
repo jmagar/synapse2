@@ -1,6 +1,7 @@
 "use client";
 
-import * as React from "react";
+import type { CSSProperties, HTMLAttributes, Ref } from "react";
+import { forwardRef, useEffect } from "react";
 import { cn } from "@/lib/utils";
 
 // ─── Keyframes ────────────────────────────────────────────────────────────────
@@ -30,7 +31,7 @@ function ensureShimmerKeyframes() {
 
 type ProgressVariant = "default" | "warn" | "error" | "rose";
 
-const fillStyleMap: Record<ProgressVariant, React.CSSProperties> = {
+const fillStyleMap: Record<ProgressVariant, CSSProperties> = {
   default: {
     background:
       "linear-gradient(90deg, var(--aurora-accent-button) 0%, var(--aurora-accent-lift) 60%, var(--aurora-accent-strong) 100%)",
@@ -73,7 +74,7 @@ type ProgressSize = keyof typeof heightMap;
 
 // ─── Props ────────────────────────────────────────────────────────────────────
 
-export interface ProgressProps extends React.HTMLAttributes<HTMLDivElement> {
+export interface ProgressProps extends HTMLAttributes<HTMLDivElement> {
   /** 0–100. If undefined the bar is indeterminate. */
   value?: number;
   /** Color variant */
@@ -86,11 +87,12 @@ export interface ProgressProps extends React.HTMLAttributes<HTMLDivElement> {
   label?: string;
   /** Max value (default 100) */
   max?: number;
+  ref?: Ref<HTMLDivElement>;
 }
 
 // ─── Component ────────────────────────────────────────────────────────────────
 
-const Progress = React.forwardRef<HTMLDivElement, ProgressProps>(
+const Progress = forwardRef<HTMLDivElement, ProgressProps>(
   (
     {
       className,
@@ -105,7 +107,7 @@ const Progress = React.forwardRef<HTMLDivElement, ProgressProps>(
     },
     ref,
   ) => {
-    React.useEffect(() => {
+    useEffect(() => {
       ensureShimmerKeyframes();
     }, []);
 

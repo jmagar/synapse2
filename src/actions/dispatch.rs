@@ -4,15 +4,17 @@
 //! All items here are re-exported from the parent [`crate::actions`] module so
 //! call sites need no changes.
 
+use std::borrow::Cow;
+
 use anyhow::Result;
 use serde_json::Value;
 
 use crate::app::SynapseService;
 
+use super::SynapseAction;
 use super::flux::{
     dispatch_flux_compose, dispatch_flux_container, dispatch_flux_docker, dispatch_flux_host,
 };
-use super::SynapseAction;
 use crate::actions::scout::{dispatch_scout_logs, dispatch_scout_zfs};
 
 /// Single dispatch hub used by both the MCP tool shim and the REST/CLI layer.
@@ -27,7 +29,7 @@ pub async fn execute_service_action(
 ) -> Result<Value> {
     let label = action_timeout_label(action);
     let value = crate::runtime_budget::with_operation_deadline(
-        &label,
+        label.as_ref(),
         execute_service_action_inner(service, action, confirmer),
     )
     .await?;
@@ -131,25 +133,27 @@ async fn execute_service_action_inner(
     }
 }
 
-fn action_timeout_label(action: &SynapseAction) -> String {
+fn action_timeout_label(action: &SynapseAction) -> Cow<'static, str> {
     match action {
-        SynapseAction::FluxHelp { .. } => "flux help".to_owned(),
-        SynapseAction::FluxDocker(args) => format!("flux docker {}", args.subaction),
-        SynapseAction::FluxContainer(args) => format!("flux container {}", args.subaction),
-        SynapseAction::FluxHost(args) => format!("flux host {}", args.subaction),
-        SynapseAction::FluxCompose(args) => format!("flux compose {}", args.subaction),
-        SynapseAction::ScoutHelp { .. } => "scout help".to_owned(),
-        SynapseAction::ScoutNodes => "scout nodes".to_owned(),
-        SynapseAction::ScoutPeek { .. } => "scout peek".to_owned(),
-        SynapseAction::ScoutFind(_) => "scout find".to_owned(),
-        SynapseAction::ScoutPs(_) => "scout ps".to_owned(),
-        SynapseAction::ScoutDf { .. } => "scout df".to_owned(),
-        SynapseAction::ScoutDelta(_) => "scout delta".to_owned(),
-        SynapseAction::ScoutExec(_) => "scout exec".to_owned(),
-        SynapseAction::ScoutEmit(_) => "scout emit".to_owned(),
-        SynapseAction::ScoutBeam(_) => "scout beam".to_owned(),
-        SynapseAction::ScoutZfs(args) => format!("scout zfs {}", args.subaction),
-        SynapseAction::ScoutLogs(args) => format!("scout logs {}", args.subaction),
+        SynapseAction::FluxHelp { .. } => Cow::Borrowed("flux help"),
+        SynapseAction::FluxDocker(args) => Cow::Owned(format!("flux docker {}", args.subaction)),
+        SynapseAction::FluxContainer(args) => {
+            Cow::Owned(format!("flux container {}", args.subaction))
+        }
+        SynapseAction::FluxHost(args) => Cow::Owned(format!("flux host {}", args.subaction)),
+        SynapseAction::FluxCompose(args) => Cow::Owned(format!("flux compose {}", args.subaction)),
+        SynapseAction::ScoutHelp { .. } => Cow::Borrowed("scout help"),
+        SynapseAction::ScoutNodes => Cow::Borrowed("scout nodes"),
+        SynapseAction::ScoutPeek { .. } => Cow::Borrowed("scout peek"),
+        SynapseAction::ScoutFind(_) => Cow::Borrowed("scout find"),
+        SynapseAction::ScoutPs(_) => Cow::Borrowed("scout ps"),
+        SynapseAction::ScoutDf { .. } => Cow::Borrowed("scout df"),
+        SynapseAction::ScoutDelta(_) => Cow::Borrowed("scout delta"),
+        SynapseAction::ScoutExec(_) => Cow::Borrowed("scout exec"),
+        SynapseAction::ScoutEmit(_) => Cow::Borrowed("scout emit"),
+        SynapseAction::ScoutBeam(_) => Cow::Borrowed("scout beam"),
+        SynapseAction::ScoutZfs(args) => Cow::Owned(format!("scout zfs {}", args.subaction)),
+        SynapseAction::ScoutLogs(args) => Cow::Owned(format!("scout logs {}", args.subaction)),
     }
 }
 

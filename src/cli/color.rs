@@ -1,4 +1,4 @@
-use anyhow::{bail, Result};
+use anyhow::{Result, bail};
 
 use crate::color_policy::{self, ColorChoice};
 
@@ -31,13 +31,13 @@ pub(crate) fn install_color_from_args(args: &mut Vec<String>) -> Result<()> {
             continue;
         }
         if arg == "--color" {
-            if let Some(next) = args.get(index + 1).map(String::as_str) {
-                if matches!(next, "always" | "never" | "auto") {
-                    color_policy::install_color_choice(parse_color_value(next)?);
-                    args.remove(index + 1);
-                    args.remove(index);
-                    continue;
-                }
+            if let Some(next) = args.get(index + 1).map(String::as_str)
+                && matches!(next, "always" | "never" | "auto")
+            {
+                color_policy::install_color_choice(parse_color_value(next)?);
+                args.remove(index + 1);
+                args.remove(index);
+                continue;
             }
             color_policy::install_color_choice(ColorChoice::Always);
             args.remove(index);

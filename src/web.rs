@@ -17,7 +17,7 @@
 //!   - Other assets         → `public, max-age=3600` (bounded cache)
 
 #[cfg(feature = "web")]
-use include_dir::{include_dir, Dir};
+use include_dir::{Dir, include_dir};
 
 #[cfg(feature = "web")]
 static WEB_ASSETS: Dir<'static> = include_dir!("$CARGO_MANIFEST_DIR/apps/web/out");
@@ -25,7 +25,7 @@ static WEB_ASSETS: Dir<'static> = include_dir!("$CARGO_MANIFEST_DIR/apps/web/out
 use axum::{
     body::Body,
     extract::Request,
-    http::{header, StatusCode},
+    http::{StatusCode, header},
     response::{IntoResponse, Response},
 };
 

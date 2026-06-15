@@ -224,28 +224,28 @@ pub fn render_container_inspect_markdown(data: &Value) -> String {
     lines.push(String::new());
 
     // Env section (redacted)
-    if let Some(env_arr) = config.get("Env").and_then(|v| v.as_array()) {
-        if !env_arr.is_empty() {
-            lines.push("**Environment Variables**".to_owned());
-            for env in env_arr.iter().take(20) {
-                let env_str = env.as_str().unwrap_or("");
-                let key = env_str.split('=').next().unwrap_or("");
-                let is_sensitive = key.to_ascii_lowercase().contains("password")
-                    || key.to_ascii_lowercase().contains("secret")
-                    || key.to_ascii_lowercase().contains("token")
-                    || key.to_ascii_lowercase().contains("api_key")
-                    || key.to_ascii_lowercase().contains("apikey");
-                if is_sensitive {
-                    lines.push(format!("- {key}=****"));
-                } else {
-                    lines.push(format!("- {env_str}"));
-                }
+    if let Some(env_arr) = config.get("Env").and_then(|v| v.as_array())
+        && !env_arr.is_empty()
+    {
+        lines.push("**Environment Variables**".to_owned());
+        for env in env_arr.iter().take(20) {
+            let env_str = env.as_str().unwrap_or("");
+            let key = env_str.split('=').next().unwrap_or("");
+            let is_sensitive = key.to_ascii_lowercase().contains("password")
+                || key.to_ascii_lowercase().contains("secret")
+                || key.to_ascii_lowercase().contains("token")
+                || key.to_ascii_lowercase().contains("api_key")
+                || key.to_ascii_lowercase().contains("apikey");
+            if is_sensitive {
+                lines.push(format!("- {key}=****"));
+            } else {
+                lines.push(format!("- {env_str}"));
             }
-            if env_arr.len() > 20 {
-                lines.push(format!("- ... and {} more", env_arr.len() - 20));
-            }
-            lines.push(String::new());
         }
+        if env_arr.len() > 20 {
+            lines.push(format!("- ... and {} more", env_arr.len() - 20));
+        }
+        lines.push(String::new());
     }
 
     // Mounts section

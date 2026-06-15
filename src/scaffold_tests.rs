@@ -102,9 +102,11 @@ fn test_validation_error_is_distinct_type() {
         ..valid_scaffold_intent()
     });
     let error = result.expect_err("invalid crate_name should be rejected");
-    assert!(error
-        .downcast_ref::<ScaffoldIntentValidationError>()
-        .is_some());
+    assert!(
+        error
+            .downcast_ref::<ScaffoldIntentValidationError>()
+            .is_some()
+    );
 }
 
 fn valid_scaffold_intent() -> ScaffoldIntent {

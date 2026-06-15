@@ -1,8 +1,6 @@
-"use client";
-
 import { Slot } from "@radix-ui/react-slot";
 import { cva, type VariantProps } from "class-variance-authority";
-import * as React from "react";
+import type { ButtonHTMLAttributes, CSSProperties, Ref } from "react";
 import { cn } from "@/lib/utils";
 
 const buttonVariants = cva(
@@ -42,7 +40,7 @@ const buttonVariants = cva(
 );
 
 // Inline style maps for Aurora-specific gradients and glows
-function getVariantStyle(variant: ButtonVariant | null | undefined): React.CSSProperties {
+function getVariantStyle(variant: ButtonVariant | null | undefined): CSSProperties {
   switch (variant) {
     case "aurora":
       return {
@@ -121,41 +119,40 @@ function getHoverStyle(variant: ButtonVariant | null | undefined): string {
 type ButtonVariant = "aurora" | "neutral" | "rose" | "ghost" | "destructive" | "plain";
 
 export interface ButtonProps
-  extends React.ButtonHTMLAttributes<HTMLButtonElement>,
+  extends ButtonHTMLAttributes<HTMLButtonElement>,
     VariantProps<typeof buttonVariants> {
   asChild?: boolean;
+  ref?: Ref<HTMLButtonElement>;
 }
 
-const Button = React.forwardRef<HTMLButtonElement, ButtonProps>(
-  ({ className, variant, size, asChild = false, style, ...props }, ref) => {
-    const Comp = asChild ? Slot : "button";
-    const variantStyle = getVariantStyle(variant);
-    const hoverClass = getHoverStyle(variant);
-    const typographyStyle =
-      variant === "plain" && size === "unstyled"
-        ? {}
-        : {
-            fontFamily: "var(--aurora-font-sans)",
-            fontSize: size === "lg" ? "14px" : size === "sm" ? "12px" : "13px",
-            fontWeight: size === "lg" ? 680 : 650,
-            letterSpacing: "0.012em",
-            lineHeight: "var(--aurora-line-ui)",
-          };
+function Button({ className, variant, size, asChild = false, style, ref, ...props }: ButtonProps) {
+  const Comp = asChild ? Slot : "button";
+  const variantStyle = getVariantStyle(variant);
+  const hoverClass = getHoverStyle(variant);
+  const typographyStyle =
+    variant === "plain" && size === "unstyled"
+      ? {}
+      : {
+          fontFamily: "var(--aurora-font-sans)",
+          fontSize: size === "lg" ? "14px" : size === "sm" ? "12px" : "13px",
+          fontWeight: size === "lg" ? 680 : 650,
+          letterSpacing: "0.012em",
+          lineHeight: "var(--aurora-line-ui)",
+        };
 
-    return (
-      <Comp
-        ref={ref}
-        className={cn(buttonVariants({ variant, size }), hoverClass, className)}
-        style={{
-          ...typographyStyle,
-          ...variantStyle,
-          ...style,
-        }}
-        {...props}
-      />
-    );
-  },
-);
+  return (
+    <Comp
+      ref={ref}
+      className={cn(buttonVariants({ variant, size }), hoverClass, className)}
+      style={{
+        ...typographyStyle,
+        ...variantStyle,
+        ...style,
+      }}
+      {...props}
+    />
+  );
+}
 Button.displayName = "Button";
 
 export { Button, buttonVariants };

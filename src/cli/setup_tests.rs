@@ -131,10 +131,12 @@ fn setup_check_reports_missing_env_as_advisory() {
 
     assert!(report.blocking_failures.is_empty());
     assert_eq!(report.exit_policy, "advisory_failure");
-    assert!(report
-        .advisory_failures
-        .iter()
-        .any(|failure| failure.code == "env_file_missing"));
+    assert!(
+        report
+            .advisory_failures
+            .iter()
+            .any(|failure| failure.code == "env_file_missing")
+    );
 }
 
 #[test]

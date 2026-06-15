@@ -6,16 +6,17 @@
  */
 
 import * as TabsPrimitive from "@radix-ui/react-tabs";
-import * as React from "react";
+import type { ComponentPropsWithoutRef, ComponentRef, Ref } from "react";
+import { forwardRef } from "react";
 import { cn } from "@/lib/utils";
 
 // ─── Line Tabs ────────────────────────────────────────────────────────────────
 
 const Tabs = TabsPrimitive.Root;
 
-const TabsList = React.forwardRef<
-  React.ComponentRef<typeof TabsPrimitive.List>,
-  React.ComponentPropsWithoutRef<typeof TabsPrimitive.List>
+const TabsList = forwardRef<
+  ComponentRef<typeof TabsPrimitive.List>,
+  ComponentPropsWithoutRef<typeof TabsPrimitive.List>
 >(({ className, style, ...props }, ref) => (
   <TabsPrimitive.List
     ref={ref}
@@ -26,9 +27,9 @@ const TabsList = React.forwardRef<
 ));
 TabsList.displayName = TabsPrimitive.List.displayName;
 
-const TabsTrigger = React.forwardRef<
-  React.ComponentRef<typeof TabsPrimitive.Trigger>,
-  React.ComponentPropsWithoutRef<typeof TabsPrimitive.Trigger>
+const TabsTrigger = forwardRef<
+  ComponentRef<typeof TabsPrimitive.Trigger>,
+  ComponentPropsWithoutRef<typeof TabsPrimitive.Trigger>
 >(({ className, ...props }, ref) => (
   <TabsPrimitive.Trigger
     ref={ref}
@@ -59,9 +60,9 @@ const TabsTrigger = React.forwardRef<
 ));
 TabsTrigger.displayName = TabsPrimitive.Trigger.displayName;
 
-const TabsContent = React.forwardRef<
-  React.ComponentRef<typeof TabsPrimitive.Content>,
-  React.ComponentPropsWithoutRef<typeof TabsPrimitive.Content>
+const TabsContent = forwardRef<
+  ComponentRef<typeof TabsPrimitive.Content>,
+  ComponentPropsWithoutRef<typeof TabsPrimitive.Content>
 >(({ className, ...props }, ref) => (
   <TabsPrimitive.Content
     ref={ref}
@@ -85,9 +86,11 @@ TabsContent.displayName = TabsPrimitive.Content.displayName;
  * Note: PillGroup renders only the TabsList, not TabsContent.
  * Pair with TabsContent outside PillGroup if panel switching is needed.
  */
-export type PillGroupProps = React.ComponentPropsWithoutRef<typeof TabsPrimitive.Root>;
+export type PillGroupProps = ComponentPropsWithoutRef<typeof TabsPrimitive.Root> & {
+  ref?: Ref<ComponentRef<typeof TabsPrimitive.Root>>;
+};
 
-const PillGroup = React.forwardRef<React.ComponentRef<typeof TabsPrimitive.Root>, PillGroupProps>(
+const PillGroup = forwardRef<ComponentRef<typeof TabsPrimitive.Root>, PillGroupProps>(
   ({ className, children, style, ...props }, ref) => (
     <TabsPrimitive.Root ref={ref} {...props}>
       <TabsPrimitive.List
@@ -105,9 +108,9 @@ const PillGroup = React.forwardRef<React.ComponentRef<typeof TabsPrimitive.Root>
 );
 PillGroup.displayName = "PillGroup";
 
-const PillTrigger = React.forwardRef<
-  React.ComponentRef<typeof TabsPrimitive.Trigger>,
-  React.ComponentPropsWithoutRef<typeof TabsPrimitive.Trigger>
+const PillTrigger = forwardRef<
+  ComponentRef<typeof TabsPrimitive.Trigger>,
+  ComponentPropsWithoutRef<typeof TabsPrimitive.Trigger>
 >(({ className, ...props }, ref) => (
   <TabsPrimitive.Trigger
     ref={ref}

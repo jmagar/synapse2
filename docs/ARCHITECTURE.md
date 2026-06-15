@@ -44,33 +44,84 @@ REST shim      (src/api.rs)       → parse HTTP JSON → call service → retur
 
 ```
 src/
-  app.rs            ← SynapseService facade; no domain accumulation
-  flux_service.rs   ← FluxService domain entry point
-  flux_service/     ← focused Docker/container/compose/host modules
-  scout_service.rs  ← ScoutService domain entry point
-  scout_service/    ← focused SSH/filesystem/process/log/ZFS modules
-  host_config.rs    ← shared host topology repository
-  config.rs         ← Config structs + env overrides
-  api.rs            ← REST API handlers (api_dispatch, health, status)
-  server.rs         ← AppState, AuthPolicy, build_auth_layer
+  app.rs                    ← SynapseService facade; no domain accumulation
+  flux_service.rs           ← FluxService domain entry point
+  flux_service/
+    docker_driver.rs        ← Flux Docker driver methods
+    container_driver.rs     ← Flux container driver methods
+    host_driver.rs          ← Flux host inspection driver methods
+    compose_driver.rs       ← Flux Compose driver methods
+    docker.rs               ← pure Docker helpers and validation
+    container_read.rs       ← pure container read helpers
+    container_lifecycle.rs  ← pure container lifecycle helpers
+    host.rs                 ← pure host exec helpers
+    compose_ops.rs          ← pure Compose command-building/result helpers
+  scout_service.rs          ← ScoutService domain entry point
+  scout_service/
+    exec.rs                 ← exec/emit/beam implementations
+    fs.rs                   ← peek/find/delta implementations
+    logs.rs                 ← syslog/journal/dmesg/auth retrieval
+    proc.rs                 ← ps/df implementations
+    zfs.rs                  ← ZFS introspection (pools/datasets/snapshots)
+  actions.rs                ← action metadata, SynapseAction enum, scope helpers
+  actions/
+    dispatch.rs             ← execute_service_action + error-type helpers
+    flux.rs                 ← typed flux arg structs + from_flux_args parser
+    scout.rs                ← typed scout arg structs + from_scout_args parser
+  host_config.rs            ← shared host topology repository
+  config.rs                 ← Config structs + env overrides
+  api.rs                    ← REST API handlers (api_dispatch, health, status)
+  server.rs                 ← AppState, AuthPolicy, build_auth_layer
   server/
-    routes.rs       ← axum router: wires mcp + api + auth + SPA fallback
-  mcp.rs            ← MCP module entry: submodule decls + re-exports only
+    routes.rs               ← axum router: wires mcp + api + auth + SPA fallback
+  mcp.rs                    ← MCP module entry: submodule decls + re-exports only
   mcp/
-    tools.rs        ← thin shim: parse args → call service → return Value
-    schemas.rs      ← tool JSON schema + ACTIONS const
-    rmcp_server.rs  ← ServerHandler impl (tools, resources, prompts, scopes)
-    prompts.rs      ← MCP prompt definitions
-    transport.rs    ← Streamable HTTP transport wiring and session lifecycle
-  cli.rs            ← thin shim: parse args → call service → format/print
+    tools.rs                ← thin shim: parse args → call service → return Value
+    schemas.rs              ← tool JSON schema + ACTIONS const
+    rmcp_server.rs          ← ServerHandler impl (tools, resources, prompts, scopes)
+    resources.rs            ← MCP resource definitions
+    prompts.rs              ← MCP prompt definitions
+    response.rs             ← MCP response shaping helpers
+    help.rs                 ← topic index and dispatch
+    help_topics.rs          ← full help text for every action/subaction
+    transport.rs            ← Streamable HTTP transport wiring and session lifecycle
+  cli.rs                    ← thin shim: parse args → call service → format/print
   cli/
-    doctor.rs       ← pre-flight checks: env, connectivity, config validation
-    setup.rs        ← interactive first-run / plugin setup wizard
-    watch.rs        ← polls /health and emits state-change lines for plugin monitor
-  token_limit.rs    ← token budget enforcement for MCP response payloads
-  web.rs            ← optional static web UI: asset serving and SPA fallback
-  lib.rs            ← pub modules + test helpers (testing::*)
-  main.rs           ← mode dispatch ONLY (serve_mcp / serve_stdio / run_cli)
+    flux.rs                 ← flux subcommand parsing and dispatch
+    flux/                   ← per-family flux CLI helpers
+    scout.rs                ← scout subcommand parsing and dispatch
+    doctor.rs               ← pre-flight checks: env, connectivity, config validation
+    setup.rs                ← interactive first-run / plugin setup wizard
+    watch.rs                ← polls /health and emits state-change lines for plugin monitor
+    help.rs                 ← CLI help text rendering
+  docker_client.rs          ← Docker client module entry and re-exports
+  docker_client/
+    traits.rs               ← DockerClient and DockerImageClient async trait definitions
+    bollard_client.rs       ← Bollard-backed implementation
+    cache.rs                ← per-host client cache with transport-death eviction
+    mock.rs                 ← MockDockerClient for unit tests
+  ssh.rs                    ← SSH execution/session pool entry point
+  ssh/                      ← pool, config, executor, transport implementations
+  fanout.rs                 ← cross-host fan-out with concurrency cap, timeout, partial-failure
+  elicitation_gate.rs       ← Confirmer trait + MCP/Cli/NoConfirm/DenyConfirm impls
+  cache.rs                  ← generic TTL-keyed async cache
+  formatters.rs             ← response formatting helpers (table, JSON, markdown)
+  formatters/               ← per-format and per-action formatter implementations
+  logging.rs                ← tracing subscriber setup and log format selection
+  logging/
+    aurora.rs               ← Aurora-themed tracing formatter
+    formatter.rs            ← generic tracing event formatter
+  color_policy.rs           ← NO_COLOR/FORCE_COLOR detection and terminal color capability
+  scaffold.rs               ← first-run directory/config scaffolding
+  synapse.rs                ← cross-cutting types and traits shared by flux and scout
+  compose.rs                ← Compose project discovery and caching
+  scout.rs                  ← scout domain types and shared SSH execution helpers
+  docker.rs                 ← Docker domain types and shared container/image helpers
+  token_limit.rs            ← token budget enforcement for MCP response payloads
+  runtime_budget.rs         ← operation deadline tracking
+  web.rs                    ← optional static web UI: asset serving and SPA fallback
+  lib.rs                    ← pub modules + test helpers (testing::*)
+  main.rs                   ← mode dispatch ONLY (serve_mcp / serve_stdio / run_cli)
 ```
 
 ## Core files
@@ -81,10 +132,16 @@ src/
 | `src/flux_service.rs` | `FluxService` implementation for Docker, container, compose, and host actions. |
 | `src/scout_service.rs` | `ScoutService` implementation for SSH, filesystem, process, log, and ZFS actions. |
 | `src/host_config.rs` | Shared host topology loading from `SYNAPSE_HOSTS_CONFIG`, `SYNAPSE_CONFIG_FILE`, and `~/.ssh/config`. |
-| `src/actions.rs` | Canonical action metadata, parsing, REST dispatch helpers. |
+| `src/actions.rs` | Canonical action metadata, `SynapseAction` enum, scope functions, parsing helpers. |
+| `src/actions/dispatch.rs` | `execute_service_action` dispatch and error-type detection helpers. |
 | `src/mcp/tools.rs` | MCP `flux` and `scout` tool dispatch plus elicitation-gated actions. |
 | `src/mcp/schemas.rs` | Tool input schema generated from action metadata. |
 | `src/mcp/rmcp_server.rs` | `ServerHandler`, scope enforcement, tools/resources/prompts. |
+| `src/mcp/resources.rs` | MCP resource definitions and handlers. |
+| `src/mcp/help_topics.rs` | Full help text for every action/subaction (59 topics). |
+| `src/fanout.rs` | Cross-host fan-out: concurrency cap, timeout, partial-failure accumulation, ordered results. |
+| `src/elicitation_gate.rs` | `Confirmer` trait and its four implementations (MCP elicitation, CLI warning, NoConfirm, DenyConfirm). |
+| `src/docker_client/cache.rs` | Per-host Docker client cache with transport-death eviction. |
 | `src/server.rs` | Axum server startup, auth policy resolution, app state. |
 | `src/server/routes.rs` | HTTP routes for MCP, health, status, REST API, and web assets. |
 | `src/config.rs` | Environment/config loading and safe defaults. |

@@ -28,11 +28,11 @@ use bollard::models::{
 use bollard::query_parameters::CreateContainerOptions;
 use bollard::query_parameters::CreateImageOptions;
 use futures_util::StreamExt;
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use std::time::Duration;
 
 use crate::docker_client::{ContainerAction, ContainerOps, ImageOps};
-use crate::runtime_budget::{append_lossy_bounded, SERVICE_TEXT_FIELD_BYTE_CAP};
+use crate::runtime_budget::{SERVICE_TEXT_FIELD_BYTE_CAP, append_lossy_bounded};
 
 // ── Exec params ────────────────────────────────────────────────────────────────
 

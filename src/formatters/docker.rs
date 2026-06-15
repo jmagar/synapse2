@@ -141,13 +141,13 @@ fn render_flattened_docker_info(entries: &[Value], data: &Value) -> String {
         lines.push(String::new());
     }
 
-    if let Some(errors) = data.get("errors").and_then(|v| v.as_object()) {
-        if !errors.is_empty() {
-            lines.push("Errors".to_owned());
-            for (host, error) in errors {
-                let error = error.as_str().unwrap_or("Docker unavailable");
-                lines.push(format!("- {host}: {error}"));
-            }
+    if let Some(errors) = data.get("errors").and_then(|v| v.as_object())
+        && !errors.is_empty()
+    {
+        lines.push("Errors".to_owned());
+        for (host, error) in errors {
+            let error = error.as_str().unwrap_or("Docker unavailable");
+            lines.push(format!("- {host}: {error}"));
         }
     }
 

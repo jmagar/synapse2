@@ -60,9 +60,11 @@ fn non_loopback_bearer_token_mounts_bearer_policy() {
 fn static_bearer_scopes_are_read_only() {
     let scopes = static_bearer_scopes();
     assert_eq!(scopes, vec![crate::actions::READ_SCOPE.to_owned()]);
-    assert!(!scopes
-        .iter()
-        .any(|scope| scope == crate::actions::WRITE_SCOPE));
+    assert!(
+        !scopes
+            .iter()
+            .any(|scope| scope == crate::actions::WRITE_SCOPE)
+    );
 }
 
 #[test]
@@ -90,9 +92,11 @@ fn invalid_public_url_is_rejected() {
     let mut config = config("0.0.0.0");
     config.mcp.auth.public_url = Some("not a url".into());
     let error = resolve_auth_policy_kind(&config, true).unwrap_err();
-    assert!(error
-        .to_string()
-        .contains("SYNAPSE_MCP_PUBLIC_URL is invalid"));
+    assert!(
+        error
+            .to_string()
+            .contains("SYNAPSE_MCP_PUBLIC_URL is invalid")
+    );
 }
 
 #[test]
@@ -100,7 +104,9 @@ fn wildcard_public_url_is_rejected() {
     let mut config = config("0.0.0.0");
     config.mcp.auth.public_url = Some("https://*.synapse2.com".into());
     let error = resolve_auth_policy_kind(&config, true).unwrap_err();
-    assert!(error
-        .to_string()
-        .contains("SYNAPSE_MCP_PUBLIC_URL must not contain wildcard hosts"));
+    assert!(
+        error
+            .to_string()
+            .contains("SYNAPSE_MCP_PUBLIC_URL must not contain wildcard hosts")
+    );
 }

@@ -13,7 +13,7 @@ mod schemas;
 mod tools;
 mod transport;
 
-pub use rmcp_server::{rmcp_server, SynapseRmcpServer};
+pub use rmcp_server::{SynapseRmcpServer, rmcp_server};
 pub use transport::{allowed_origins, streamable_http_config, streamable_http_service};
 
 #[cfg(any(test, feature = "test-support"))]

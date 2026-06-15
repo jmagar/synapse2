@@ -1,4 +1,4 @@
-use super::{all_resources, ALL_URIS};
+use super::{ALL_URIS, all_resources};
 
 #[test]
 fn list_resources_returns_all_six_uris() {

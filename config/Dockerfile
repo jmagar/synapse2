@@ -21,7 +21,12 @@
 # ── Stage 1: Web assets ───────────────────────────────────────────────────────
 # Build the static Next.js export inside Docker so fresh clones do not need a
 # pre-existing ignored apps/web/out/ directory.
-FROM node:26-bookworm-slim AS web
+# DIGEST-PIN: Refresh with:
+#   docker pull node:26-bookworm-slim
+#   docker inspect --format '{{index .RepoDigests 0}}' node:26-bookworm-slim
+# Then replace the tag below with:
+#   FROM node@sha256:<digest> AS web  # node:26-bookworm-slim
+FROM node:26.3.0-bookworm-slim AS web
 
 WORKDIR /app/apps/web
 
@@ -33,9 +38,11 @@ COPY apps/web/ ./
 RUN pnpm build
 
 # ── Stage 2: Builder ──────────────────────────────────────────────────────────
-# TEMPLATE: Pin to a digest for reproducible builds:
-#   docker pull rust:1.90-slim-bookworm
-#   docker inspect --format '{{index .RepoDigests 0}}' rust:1.90-slim-bookworm
+# DIGEST-PIN: Refresh with:
+#   docker pull rust:1.96-slim-bookworm
+#   docker inspect --format '{{index .RepoDigests 0}}' rust:1.96-slim-bookworm
+# Then replace the tag below with:
+#   FROM rust@sha256:<digest> AS builder  # rust:1.96-slim-bookworm
 FROM rust:1.96-slim-bookworm AS builder
 
 WORKDIR /app
@@ -77,9 +84,11 @@ RUN --mount=type=cache,id=synapse2-cargo-registry,target=/usr/local/cargo/regist
 # ── Stage 3: Runtime ──────────────────────────────────────────────────────────
 # Minimal Debian image — no Rust toolchain, no build tools.
 # Only ca-certificates (for TLS) and curl (for HEALTHCHECK).
-# Pinned to bookworm-slim 2026-05-15 — update quarterly with:
+# DIGEST-PIN: Update quarterly with:
 #   docker pull debian:bookworm-slim
 #   docker inspect --format '{{index .RepoDigests 0}}' debian:bookworm-slim
+# Then replace the tag below with:
+#   FROM debian@sha256:<digest>  # debian:bookworm-slim YYYY-MM-DD
 FROM debian:bookworm-slim
 
 # Install runtime dependencies:
@@ -92,8 +101,12 @@ FROM debian:bookworm-slim
 #           statically linked). Alpine users: replace gosu with su-exec and update
 #           entrypoint.sh accordingly.
 RUN apt-get update && \
-    apt-get install -y --no-install-recommends ca-certificates curl gosu openssh-client procps iproute2 docker.io && \
+    apt-get install -y --no-install-recommends ca-certificates curl gosu openssh-client procps iproute2 && \
     rm -rf /var/lib/apt/lists/*
+# NOTE: docker.io (the Docker daemon CLI) was removed. Bollard communicates with
+# the Docker daemon entirely via the mounted socket (/var/run/docker.sock) and
+# does not invoke the docker binary at runtime. Installing the full daemon added
+# ~100-200 MB to the image for zero benefit.
 
 # TEMPLATE: Replace "example" with your binary name in both COPY and target path.
 COPY --from=builder /usr/local/bin/synapse /usr/local/bin/synapse

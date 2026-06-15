@@ -234,29 +234,29 @@ pub fn render_host_resources_markdown(data: &Value) -> String {
         ));
 
         // Disks
-        if let Some(disks) = entry.get("disk").and_then(|v| v.as_array()) {
-            if !disks.is_empty() {
-                lines.push(String::new());
-                lines.push("**Disks:**".to_owned());
-                for d in disks {
-                    let mount = str_field(d, "mount");
-                    let used_gb = d.get("used_gb").and_then(|v| v.as_f64()).unwrap_or(0.0);
-                    let total_gb = d.get("total_gb").and_then(|v| v.as_f64()).unwrap_or(0.0);
-                    let disk_percent =
-                        d.get("percent")
-                            .and_then(|v| v.as_f64())
-                            .unwrap_or_else(|| {
-                                if total_gb > 0.0 {
-                                    used_gb / total_gb * 100.0
-                                } else {
-                                    0.0
-                                }
-                            });
-                    let disk_warn = if disk_percent > 85.0 { " ⚠" } else { "" };
-                    lines.push(format!(
-                        "- {mount}: {used_gb:.0}G / {total_gb:.0}G ({disk_percent:.0}%{disk_warn})"
-                    ));
-                }
+        if let Some(disks) = entry.get("disk").and_then(|v| v.as_array())
+            && !disks.is_empty()
+        {
+            lines.push(String::new());
+            lines.push("**Disks:**".to_owned());
+            for d in disks {
+                let mount = str_field(d, "mount");
+                let used_gb = d.get("used_gb").and_then(|v| v.as_f64()).unwrap_or(0.0);
+                let total_gb = d.get("total_gb").and_then(|v| v.as_f64()).unwrap_or(0.0);
+                let disk_percent = d
+                    .get("percent")
+                    .and_then(|v| v.as_f64())
+                    .unwrap_or_else(|| {
+                        if total_gb > 0.0 {
+                            used_gb / total_gb * 100.0
+                        } else {
+                            0.0
+                        }
+                    });
+                let disk_warn = if disk_percent > 85.0 { " ⚠" } else { "" };
+                lines.push(format!(
+                    "- {mount}: {used_gb:.0}G / {total_gb:.0}G ({disk_percent:.0}%{disk_warn})"
+                ));
             }
         }
 

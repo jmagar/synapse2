@@ -6,14 +6,14 @@
 use anyhow::Result;
 use axum::{
     extract::{Extension, State},
-    http::{header, StatusCode},
+    http::{StatusCode, header},
     response::{IntoResponse, Json},
 };
 use lab_auth::AuthContext;
 use serde::Deserialize;
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 
-use crate::actions::{execute_service_action, required_scope_for_parsed_action, SynapseAction};
+use crate::actions::{SynapseAction, execute_service_action, required_scope_for_parsed_action};
 use crate::server::{AppState, AuthPolicy};
 use crate::token_limit::MAX_RESPONSE_BYTES;
 
@@ -77,6 +77,16 @@ pub async fn api_dispatch(
             Json(json!({"error": e.to_string()})),
         )
             .into_response(),
+        // Destructive-op confirmation denied (no elicitation channel over REST).
+        // Return 403 Forbidden — not 500 — and do not log at error level.
+        Err(e) if crate::actions::is_confirmation_denied(&e) => {
+            tracing::debug!(action = %body.action, "REST destructive action denied: no confirmation channel");
+            (
+                StatusCode::FORBIDDEN,
+                Json(json!({"error": "forbidden: destructive action requires confirmation; set SYNAPSE_MCP_ALLOW_DESTRUCTIVE=true or use MCP"})),
+            )
+                .into_response()
+        }
         Err(e) => {
             tracing::error!(error = %e, action = %body.action, "REST action execution failed");
             (
@@ -88,56 +98,84 @@ pub async fn api_dispatch(
     }
 }
 
+/// REST compatibility subset of synapse2 actions.
+///
+/// This surface is intentionally limited to the dotted action names listed
+/// below — it is NOT a full mirror of the MCP/CLI surface. New actions must be
+/// explicitly added here; unknown dotted names fall through to the
+/// `UnknownAction` error rather than accidentally routing to wrong subactions.
+///
+/// Parsing uses `split_once('.')` so that malformed names such as
+/// `flux.docker.foo.bar` (three dots) are handled correctly: the first split
+/// gives `("flux", "docker.foo.bar")` which is then matched against the exact
+/// known second-segment set, and any non-matching value falls through to the
+/// catch-all error.
 fn rest_action_from_request(action: &str, params: &Value) -> Result<SynapseAction> {
     match action {
         "help" => Ok(SynapseAction::FluxHelp {
             topic: None,
             format: None,
         }),
-        // Docker subactions over REST. Merge caller params (host, dangling_only,
-        // image, etc.) into the flux arg shape so REST honors the same options
-        // as MCP/CLI. Destructive subactions (build/rmi/prune) are reachable
-        // but hard-denied without the allow-destructive override (no
-        // elicitation channel over REST — see api_dispatch).
-        "flux.docker.info"
-        | "flux.docker.df"
-        | "flux.docker.images"
-        | "flux.docker.networks"
-        | "flux.docker.volumes"
-        | "flux.docker.pull"
-        | "flux.docker.build"
-        | "flux.docker.rmi"
-        | "flux.docker.prune" => {
-            let subaction = action.trim_start_matches("flux.docker.");
-            let mut obj = params.as_object().cloned().unwrap_or_default();
-            obj.insert("action".into(), json!("docker"));
-            obj.insert("subaction".into(), json!(subaction));
-            SynapseAction::from_flux_args(&Value::Object(obj))
-        }
-        "flux.container.list" => {
-            // Merge caller params (may be null/absent) into the flux arg shape so
-            // REST honors the same list filters as MCP/CLI.
-            let mut obj = params.as_object().cloned().unwrap_or_default();
-            obj.insert("action".into(), json!("container"));
-            obj.insert("subaction".into(), json!("list"));
-            SynapseAction::from_flux_args(&Value::Object(obj))
-        }
         "scout.nodes" => Ok(SynapseAction::ScoutNodes),
-        "scout.peek" => Ok(SynapseAction::from_scout_args(&json!({
-            "action": "peek",
-            "host": params.get("host").and_then(Value::as_str).unwrap_or("local"),
-            "path": params.get("path").and_then(Value::as_str).unwrap_or("/tmp")
-        }))?),
-        "scout.exec" => Ok(SynapseAction::from_scout_args(&json!({
-            "action": "exec",
-            "host": params.get("host").and_then(Value::as_str).unwrap_or("local"),
-            "path": params.get("path").and_then(Value::as_str).unwrap_or("/tmp"),
-            "command": params.get("command").and_then(Value::as_str).unwrap_or("")
-        }))?),
-        other => Err(crate::actions::ValidationError::UnknownAction {
-            action: other.to_owned(),
+        other => {
+            // Split exactly once on '.' to get (domain, rest).
+            // A name with zero dots or three-or-more dots will either not match
+            // in the inner match below or fall through to UnknownAction.
+            let Some((domain, rest)) = other.split_once('.') else {
+                return Err(crate::actions::ValidationError::UnknownAction {
+                    action: other.to_owned(),
+                }
+                .into());
+            };
+
+            match (domain, rest) {
+                // Docker subactions over REST. Merge caller params (host,
+                // dangling_only, image, etc.) into the flux arg shape so REST
+                // honors the same options as MCP/CLI. Destructive subactions
+                // (build/rmi/prune) are reachable but hard-denied without the
+                // allow-destructive override (no elicitation channel over REST
+                // — see api_dispatch).
+                (
+                    "flux",
+                    sub @ ("docker.info" | "docker.df" | "docker.images" | "docker.networks"
+                    | "docker.volumes" | "docker.pull" | "docker.build" | "docker.rmi"
+                    | "docker.prune"),
+                ) => {
+                    // sub is "docker.<subaction>"; split once more to isolate
+                    // the subaction name without trimming a variable prefix.
+                    let subaction = sub.split_once('.').map(|(_, s)| s).unwrap_or(sub);
+                    let mut obj = params.as_object().cloned().unwrap_or_default();
+                    obj.insert("action".into(), json!("docker"));
+                    obj.insert("subaction".into(), json!(subaction));
+                    SynapseAction::from_flux_args(&Value::Object(obj))
+                }
+                ("flux", "container.list") => {
+                    // Merge caller params (may be null/absent) into the flux arg
+                    // shape so REST honors the same list filters as MCP/CLI.
+                    let mut obj = params.as_object().cloned().unwrap_or_default();
+                    obj.insert("action".into(), json!("container"));
+                    obj.insert("subaction".into(), json!("list"));
+                    SynapseAction::from_flux_args(&Value::Object(obj))
+                }
+                // Scout subactions: pass the raw params object through to
+                // from_scout_args so the parser owns defaults and required-field
+                // errors, matching the MCP path exactly.
+                ("scout", "peek") => {
+                    let mut obj = params.as_object().cloned().unwrap_or_default();
+                    obj.insert("action".into(), json!("peek"));
+                    SynapseAction::from_scout_args(&Value::Object(obj))
+                }
+                ("scout", "exec") => {
+                    let mut obj = params.as_object().cloned().unwrap_or_default();
+                    obj.insert("action".into(), json!("exec"));
+                    SynapseAction::from_scout_args(&Value::Object(obj))
+                }
+                _ => Err(crate::actions::ValidationError::UnknownAction {
+                    action: other.to_owned(),
+                }
+                .into()),
+            }
         }
-        .into()),
     }
 }
 

@@ -13,7 +13,7 @@
 //!
 //! Wire [`list_resources`] and [`read_resource`] from `rmcp_server.rs`.
 
-use anyhow::{bail, Result};
+use anyhow::{Result, bail};
 use rmcp::model::{RawResource, Resource, ResourceContents};
 use serde_json::Value;
 

@@ -37,14 +37,14 @@ use std::path::Path;
 use std::sync::Arc;
 use std::time::Duration;
 
-use anyhow::{bail, Result};
-use serde_json::{json, Value};
+use anyhow::{Result, bail};
+use serde_json::{Value, json};
 
-use crate::elicitation_gate::{ConfirmationDenied, Confirmer};
-use crate::fanout::{fanout, FanoutOutcome};
+use crate::elicitation_gate::Confirmer;
+use crate::fanout::{FanoutOutcome, fanout};
 use crate::flux_service::host::is_local_host;
 use crate::ssh::SshExecutor;
-use crate::synapse::{validate_command, validate_safe_path, HostConfig};
+use crate::synapse::{HostConfig, validate_command, validate_safe_path};
 
 /// Default timeout for `emit` per-host execution.
 const EMIT_DEFAULT_TIMEOUT_SECS: u64 = 30;
@@ -80,10 +80,7 @@ pub async fn exec(
         host.name,
         path.map(|p| format!(" path={p}")).unwrap_or_default()
     );
-    confirmer
-        .require("scout:exec", &details)
-        .await
-        .map_err(|e: ConfirmationDenied| anyhow::anyhow!("{e}"))?;
+    confirmer.require("scout:exec", &details).await?;
 
     let arg_strs: Vec<&str> = args.iter().map(|s| s.as_str()).collect();
 
@@ -173,10 +170,7 @@ pub async fn emit(
         })
         .collect();
     let details = format!("command={command} targets={}", target_labels.join(", "));
-    confirmer
-        .require("scout:emit", &details)
-        .await
-        .map_err(|e: ConfirmationDenied| anyhow::anyhow!("{e}"))?;
+    confirmer.require("scout:emit", &details).await?;
 
     let timeout = Duration::from_secs(timeout_secs.unwrap_or(EMIT_DEFAULT_TIMEOUT_SECS));
 
@@ -186,7 +180,7 @@ pub async fn emit(
     let args_owned: Vec<String> = args.to_vec();
     let target_paths = Arc::new(target_paths);
 
-    let outcome: FanoutOutcome<Value, String> = fanout(&host_configs, |host| {
+    let outcome: FanoutOutcome<Value, String> = fanout(&host_configs, move |host| {
         let ex = Arc::clone(&executor);
         let cmd = command_owned.clone();
         let arg_strs: Vec<String> = args_owned.clone();
@@ -323,29 +317,32 @@ pub async fn beam(
     let dest_label = format!("{}:{}", dest_host.name, dest_path);
 
     let details = format!("{source_label} → {dest_label}");
-    confirmer
-        .require("scout:beam", &details)
-        .await
-        .map_err(|e: ConfirmationDenied| anyhow::anyhow!("{e}"))?;
+    confirmer.require("scout:beam", &details).await?;
 
     // Build scp args (no shell — args are typed, not interpolated).
     // scp format: scp [user@]host:path [user@]host:path
     // For local hosts we use the bare path (no host prefix).
-    let src_arg = scp_arg(source_host, source_path);
-    let dst_arg = scp_arg(dest_host, dest_path);
+    // Port is passed as a separate -P flag, never embedded in the address
+    // string, to avoid ambiguity and injection risks (S-M4).
+    let src_arg = scp_arg(source_host, source_path)?;
+    let dst_arg = scp_arg(dest_host, dest_path)?;
 
-    let output = crate::runtime_budget::run_local_command(
-        "scp",
-        &[
-            "-q",
-            "-o",
-            "StrictHostKeyChecking=yes",
-            src_arg.as_str(),
-            dst_arg.as_str(),
-        ],
-        None,
-    )
-    .await?;
+    // Determine the SSH port from the source or dest host (both must agree if
+    // both are remote; source host takes precedence).
+    let port_str: Option<String> = source_host
+        .ssh_port
+        .or(dest_host.ssh_port)
+        .map(|p| p.to_string());
+
+    let mut scp_args: Vec<&str> = vec!["-q", "-o", "StrictHostKeyChecking=yes"];
+    if let Some(ref p) = port_str {
+        scp_args.push("-P");
+        scp_args.push(p.as_str());
+    }
+    scp_args.push(src_arg.as_str());
+    scp_args.push(dst_arg.as_str());
+
+    let output = crate::runtime_budget::run_local_command("scp", &scp_args, None).await?;
 
     if !output.success() {
         bail!("beam: scp failed: {}", output.stderr);
@@ -358,14 +355,68 @@ pub async fn beam(
     }))
 }
 
+// ─── SSH identity validators (S-M4) ─────────────────────────────────────────
+
+/// Validate an SSH username before embedding it in an scp argument.
+///
+/// Accepts: ASCII alphanumeric characters, `-`, `_`, and `.`.
+/// Rejects: anything else, including leading `-` that could be treated as an
+/// scp option, whitespace, shell metacharacters, and ProxyCommand injection
+/// attempts (e.g. `-oProxyCommand=...`).
+fn validate_ssh_user(user: &str) -> Result<()> {
+    if user.is_empty() {
+        bail!("ssh_user must not be empty");
+    }
+    if !user
+        .chars()
+        .all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.'))
+    {
+        bail!(
+            "ssh_user contains invalid characters (only ASCII alphanumeric, `-`, `_`, `.` allowed): {user:?}"
+        );
+    }
+    if user.starts_with('-') {
+        bail!("ssh_user must not start with `-` (got: {user:?})");
+    }
+    Ok(())
+}
+
+/// Validate an SSH hostname before embedding it in an scp argument.
+///
+/// Accepts: ASCII alphanumeric characters, `-`, `.`.
+/// Rejects: anything else, including whitespace, `@`, colons, and options.
+fn validate_ssh_host(host_str: &str) -> Result<()> {
+    if host_str.is_empty() {
+        bail!("host must not be empty");
+    }
+    if !host_str
+        .chars()
+        .all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '.'))
+    {
+        bail!(
+            "host contains invalid characters (only ASCII alphanumeric, `-`, `.` allowed): {host_str:?}"
+        );
+    }
+    if host_str.starts_with('-') {
+        bail!("host must not start with `-` (got: {host_str:?})");
+    }
+    Ok(())
+}
+
 /// Format the scp argument for a host + path.
-fn scp_arg(host: &HostConfig, path: &str) -> String {
+///
+/// The port is passed as a SEPARATE `-P` argument (not embedded in the address)
+/// to avoid any ambiguity. `ssh_user` and `host.host` are validated before use.
+fn scp_arg(host: &HostConfig, path: &str) -> Result<String> {
     if is_local_host(host) {
-        path.to_owned()
-    } else {
-        match &host.ssh_user {
-            Some(user) => format!("{user}@{}:{path}", host.host),
-            None => format!("{}:{path}", host.host),
+        return Ok(path.to_owned());
+    }
+    validate_ssh_host(&host.host)?;
+    match &host.ssh_user {
+        Some(user) => {
+            validate_ssh_user(user)?;
+            Ok(format!("{user}@{}:{path}", host.host))
         }
+        None => Ok(format!("{}:{path}", host.host)),
     }
 }

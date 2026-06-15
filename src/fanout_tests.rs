@@ -9,11 +9,11 @@
 //! - Concurrency cap: N=20 hosts, cap=8 — never more than 8 in-flight (measured).
 //! - Per-host timeout in op does not affect other hosts.
 
-use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::Duration;
 
-use crate::fanout::{fanout, FanoutOutcome};
+use crate::fanout::{FanoutOutcome, fanout};
 use crate::synapse::{HostConfig, HostProtocol};
 
 // ---------------------------------------------------------------------------

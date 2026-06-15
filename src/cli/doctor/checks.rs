@@ -16,7 +16,7 @@ use std::path::Path;
 
 use crate::{
     config::Config,
-    server::{resolve_auth_policy_kind, AuthPolicyKind},
+    server::{AuthPolicyKind, resolve_auth_policy_kind},
 };
 
 use super::DoctorCheck;

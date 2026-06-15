@@ -1,25 +1,26 @@
 //! Scout filesystem operations: `peek`, `find`, `delta`.
 //!
 //! All path parameters go through `validate_safe_path` (absolute, no `..`,
-//! no unsafe chars, no symlinks — see B0). For remote paths the symlink check
-//! is based on local `symlink_metadata`, so only the syntactic guards apply
-//! remotely; the read operation itself goes through SSH exec, not a local read.
+//! no unsafe chars, no symlinks — see B0). For remote paths the syntactic
+//! guards from `validate_safe_path` apply; additionally, `peek_remote` and
+//! `read_remote_file` perform a `stat -c %F <path>` via SSH to reject
+//! symbolic links before reading (S-M1 remote symlink TOCTOU guard).
 //!
 //! `delta` content mode is capped at 1 MB to prevent diffing large blobs.
 
 use std::fs::File;
 use std::io::Read;
 
-use anyhow::{bail, Result};
-use serde_json::{json, Value};
+use anyhow::{Result, bail};
+use serde_json::{Value, json};
 
 #[cfg(test)]
 #[path = "fs_tests.rs"]
 mod tests;
 
-use crate::flux_service::host::{is_local_host, HostExec, LocalExec, RemoteExec};
+use crate::flux_service::host::{HostExec, LocalExec, RemoteExec, is_local_host};
 use crate::ssh::SshExecutor;
-use crate::synapse::{validate_scout_read_path, HostConfig};
+use crate::synapse::{HostConfig, validate_scout_read_path};
 
 /// Maximum inline content size for `delta` content mode.
 pub const DELTA_MAX_CONTENT_BYTES: usize = 1024 * 1024; // 1 MB
@@ -87,8 +88,29 @@ fn peek_local(host: &HostConfig, path: &str) -> Result<Value> {
 
 async fn peek_remote(host: &HostConfig, executor: &dyn SshExecutor, path: &str) -> Result<Value> {
     // Try stat to determine file vs directory.
-    let stat_out = executor.exec(host, "stat", &["-c", "%F\t%s", path]).await?;
+    // We request both type (%F) and size (%s) in one call, then check for
+    // symlinks BEFORE reading (S-M1 remote symlink TOCTOU guard).
+    //
+    // `env LC_ALL=C` forces the locale-independent "symbolic link" string (a
+    // translated locale would otherwise slip a symlink past the `==` check).
+    // We also REQUIRE stat to succeed: an empty stdout from a failed stat
+    // (busybox without GNU stat, EPERM, …) must not silently bypass the guard.
+    let stat_out = executor
+        .exec(host, "env", &["LC_ALL=C", "stat", "-c", "%F\t%s", path])
+        .await?;
+    if stat_out.exit_code != Some(0) {
+        bail!(
+            "peek: cannot stat {path} (exit {:?}): {}",
+            stat_out.exit_code,
+            stat_out.stderr.trim()
+        );
+    }
     let (kind, size_bytes) = parse_stat_kind_size(stat_out.stdout.trim());
+
+    // Reject symbolic links on the remote side.
+    if kind == "symbolic link" {
+        bail!("peek: path is a symbolic link, which is not permitted: {path}");
+    }
 
     if kind == "directory" {
         // List the directory with ls -1A.
@@ -186,9 +208,16 @@ pub async fn find(
 ) -> Result<Value> {
     validate_scout_read_path(host, path)?;
 
-    // Pattern guard: reject leading `-` to prevent option injection.
+    // Pattern guard (S-M2): reject leading `-` to prevent option injection,
+    // NUL bytes (which would truncate the argv string), and over-length values.
     if pattern.starts_with('-') {
         bail!("find pattern must not start with `-`");
+    }
+    if pattern.contains('\0') {
+        bail!("find pattern must not contain NUL bytes");
+    }
+    if pattern.len() > 256 {
+        bail!("find pattern too long: {} chars (max 256)", pattern.len());
     }
 
     let depth_str = depth
@@ -249,10 +278,10 @@ pub async fn delta(
     validate_scout_read_path(source_host, source_path)?;
 
     // VALIDATION FIRST — content size checked before any IO.
-    if let Some(inline) = content {
-        if inline.len() > DELTA_MAX_CONTENT_BYTES {
-            bail!("delta content exceeds 1 MB limit");
-        }
+    if let Some(inline) = content
+        && inline.len() > DELTA_MAX_CONTENT_BYTES
+    {
+        bail!("delta content exceeds 1 MB limit");
     }
 
     match (target_host, target_path, content) {
@@ -291,6 +320,10 @@ pub async fn delta(
 }
 
 /// Read a file from `host` via SSH exec (cat) or local fs.
+///
+/// For remote hosts a `stat -c %F <path>` check runs BEFORE `cat` to reject
+/// symbolic links (S-M1 remote symlink TOCTOU guard). Local reads rely on the
+/// symlink check already enforced by `validate_safe_path` / `validate_scout_read_path`.
 async fn read_remote_file(
     host: &HostConfig,
     executor: &dyn SshExecutor,
@@ -301,6 +334,23 @@ async fn read_remote_file(
         Ok(std::fs::read_to_string(path)?)
     } else {
         validate_scout_read_path(host, path)?;
+        // Remote symlink guard (S-M1): stat the path via SSH before reading.
+        // `env LC_ALL=C` keeps the "symbolic link" string locale-independent;
+        // a failed stat must fail closed (not silently bypass the guard).
+        let stat_out = executor
+            .exec(host, "env", &["LC_ALL=C", "stat", "-c", "%F", path])
+            .await?;
+        if stat_out.exit_code != Some(0) {
+            bail!(
+                "read_remote_file: cannot stat {path} (exit {:?}): {}",
+                stat_out.exit_code,
+                stat_out.stderr.trim()
+            );
+        }
+        let file_type = stat_out.stdout.trim();
+        if file_type == "symbolic link" {
+            bail!("read_remote_file: path is a symbolic link, which is not permitted: {path}");
+        }
         let out = executor.exec(host, "cat", &[path]).await?;
         if out.exit_code != Some(0) && !out.stderr.is_empty() {
             bail!("read {path}: {}", out.stderr.trim());

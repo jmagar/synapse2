@@ -38,7 +38,7 @@ pub mod forward;
 pub mod known_hosts;
 pub mod pool;
 
-pub use forward::{forward_socket_path, ForwardedSocket};
+pub use forward::{ForwardedSocket, forward_socket_path};
 pub use known_hosts::{
     scan_known_hosts_wildcards, sweep_stale_sockets, sweep_stale_sockets_in,
     warn_on_known_hosts_wildcards,

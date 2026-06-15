@@ -22,16 +22,16 @@ pub fn warn_on_known_hosts_wildcards() {
         return;
     };
     let path = Path::new(&home).join(".ssh").join("known_hosts");
-    if let Some(patterns) = scan_known_hosts_wildcards(&path) {
-        if !patterns.is_empty() {
-            tracing::warn!(
-                count = patterns.len(),
-                "~/.ssh/known_hosts contains wildcard host patterns ({}); \
+    if let Some(patterns) = scan_known_hosts_wildcards(&path)
+        && !patterns.is_empty()
+    {
+        tracing::warn!(
+            count = patterns.len(),
+            "~/.ssh/known_hosts contains wildcard host patterns ({}); \
                  these trust ANY host key and undermine StrictHostKeyChecking — \
                  see docs/SECURITY.md",
-                patterns.join(", ")
-            );
-        }
+            patterns.join(", ")
+        );
     }
 }
 

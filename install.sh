@@ -128,14 +128,24 @@ download_and_install() {
     exit 1
   fi
 
-  # TEMPLATE: Optionally verify checksum. If your release includes .sha256 files:
-  # local checksum_url="${base_url}/${archive}.sha256"
-  # if curl -fsSL "${checksum_url}" -o "${tmp_dir}/${archive}.sha256" 2>/dev/null; then
-  #   (cd "${tmp_dir}" && sha256sum --check "${archive}.sha256")
-  #   ok "Checksum verified"
-  # else
-  #   warn "No checksum file found at ${checksum_url} — skipping verification"
-  # fi
+  # Verify SHA256 checksum against the SHA256SUMS file published by release.yml.
+  # The file contains one line per asset: "<sha256>  <filename>".
+  local sums_url="${base_url}/SHA256SUMS"
+  info "Verifying checksum..."
+  if curl -fsSL "${sums_url}" -o "${tmp_dir}/SHA256SUMS" 2>/dev/null; then
+    # Extract only the line for our archive so sha256sum --check sees a valid file.
+    grep "${archive}" "${tmp_dir}/SHA256SUMS" > "${tmp_dir}/${archive}.sha256" || {
+      warn "Archive '${archive}' not found in SHA256SUMS — skipping verification"
+      warn "This may indicate a version mismatch or a tampered release asset."
+    }
+    if [[ -s "${tmp_dir}/${archive}.sha256" ]]; then
+      (cd "${tmp_dir}" && sha256sum --check "${archive}.sha256")
+      ok "Checksum verified"
+    fi
+  else
+    warn "No SHA256SUMS file found at ${sums_url} — skipping checksum verification"
+    warn "Consider verifying the binary manually before running it in production."
+  fi
 
   info "Extracting..."
   tar -xzf "${tmp_dir}/${archive}" -C "${tmp_dir}"

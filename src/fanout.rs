@@ -187,8 +187,8 @@ pub async fn fanout<T, E, F, Fut>(
     op: F,
 ) -> FanoutOutcome<T, E>
 where
-    F: Fn(crate::synapse::HostConfig) -> Fut,
-    Fut: std::future::Future<Output = Result<T, E>>,
+    F: Fn(crate::synapse::HostConfig) -> Fut + Send + Sync + 'static,
+    Fut: std::future::Future<Output = Result<T, E>> + Send + 'static,
     T: Send + 'static,
     E: Send + 'static,
 {
@@ -199,6 +199,9 @@ where
 
     let cap = n.min(8);
     let sem = Arc::new(Semaphore::new(cap));
+    // Wrap `op` in `Arc` so each per-host future can hold a shared reference
+    // without requiring `FnOnce` (P-C2: op is called inside the permit block).
+    let op = Arc::new(op);
 
     let mut futures: FuturesUnordered<_> = FuturesUnordered::new();
 
@@ -206,13 +209,29 @@ where
         let host_name = host.name.clone();
         let host_clone = host.clone();
         let sem_clone = Arc::clone(&sem);
-        let fut = op(host_clone);
+        let op_clone = Arc::clone(&op);
 
         futures.push(async move {
             // Acquire the permit INSIDE the future (not before push) to prevent
             // deadlock under load — the semaphore is not held across poll boundaries.
+            //
+            // IMPORTANT: `op(host_clone)` is called *after* acquiring the permit
+            // (P-C2). This ensures that all pre-`await` work (arg construction,
+            // connection setup) is bounded by the cap, not just the `.await`
+            // resumption. Calling `op(...)` before pushing to `FuturesUnordered`
+            // would burst all N tasks into the runtime simultaneously, causing
+            // memory spikes on large host lists.
+            //
+            // This does not reintroduce the DashMap-guard-across-await deadlock
+            // the original comment guarded against: `op` is not called until we
+            // hold the permit, and the permit is released on drop at end of scope.
+            //
+            // Safety of `.expect`: the semaphore is created locally in this
+            // function and is never closed — `Semaphore::close` is never called
+            // on it, so `acquire()` can only return `Err` if the semaphore was
+            // closed, which cannot happen here.
             let _permit = sem_clone.acquire().await.expect("semaphore never closed");
-            let result = fut.await;
+            let result = op_clone(host_clone).await;
             HostResult {
                 index,
                 host: host_name,

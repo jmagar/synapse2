@@ -1,5 +1,5 @@
 use anyhow::Result;
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 
 // ── Submodules ────────────────────────────────────────────────────────────────
 
@@ -18,36 +18,19 @@ pub use scout::{
 
 // ── Validation error type ─────────────────────────────────────────────────────
 
-#[derive(Debug)]
+#[derive(Debug, thiserror::Error)]
 pub enum ValidationError {
+    #[error("action is required")]
     MissingAction,
+    #[error("`{field}` is required and must not be empty")]
     MissingField { field: String },
+    #[error("`{field}` must be a string")]
     WrongType { field: String },
+    #[error("action={action} is not available over REST; use MCP or action=help for documentation")]
     NotAvailableOverRest { action: String },
+    #[error("unknown synapse2 action: {action}; use action=help for documentation")]
     UnknownAction { action: String },
 }
-
-impl std::fmt::Display for ValidationError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::MissingAction => write!(f, "action is required"),
-            Self::MissingField { field } => {
-                write!(f, "`{field}` is required and must not be empty")
-            }
-            Self::WrongType { field } => write!(f, "`{field}` must be a string"),
-            Self::NotAvailableOverRest { action } => write!(
-                f,
-                "action={action} is not available over REST; use MCP or action=help for documentation"
-            ),
-            Self::UnknownAction { action } => write!(
-                f,
-                "unknown synapse2 action: {action}; use action=help for documentation"
-            ),
-        }
-    }
-}
-
-impl std::error::Error for ValidationError {}
 
 // ── Scope constants & helpers ─────────────────────────────────────────────────
 
@@ -64,6 +47,7 @@ pub fn scopes_satisfy(token_scopes: &[String], required: &str) -> bool {
         .any(|s| s == required || (required == READ_SCOPE && s == WRITE_SCOPE))
 }
 
+#[non_exhaustive]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ActionTransport {
     Any,
@@ -285,6 +269,7 @@ fn action_spec(action: &str) -> Option<&'static ActionSpec> {
 
 // ── SynapseAction enum ────────────────────────────────────────────────────────
 
+#[non_exhaustive]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum SynapseAction {
     /// B16: topic-aware help for the flux tool.

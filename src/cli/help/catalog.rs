@@ -159,7 +159,9 @@ const NESTED_CATALOG: &[NestedCommandDoc] = &[
     NestedCommandDoc {
         path: "scout logs",
         summary: "Remote syslog, journal, dmesg, and auth log reads",
-        usage: &["synapse scout logs syslog|journal|dmesg|auth --host HOST [--lines N] [--grep STR]"],
+        usage: &[
+            "synapse scout logs syslog|journal|dmesg|auth --host HOST [--lines N] [--grep STR]",
+        ],
     },
     NestedCommandDoc {
         path: "setup plugin-hook",

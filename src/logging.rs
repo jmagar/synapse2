@@ -55,11 +55,39 @@ use std::io::IsTerminal;
 use std::path::Path;
 
 use anyhow::{Context, Result};
-use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt, EnvFilter};
+use tracing_subscriber::{EnvFilter, layer::SubscriberExt, util::SubscriberInitExt};
 
 use formatter::AuroraFormatter;
 
+/// Detect the desired log format from `LOG_FORMAT` or `RUST_LOG_FORMAT`.
+///
+/// Returns `true` when the caller should emit JSON (structured) log lines.
+/// Either variable may be set to `"json"` (case-insensitive); any other value
+/// (or absence of both variables) selects the default human-readable format.
+///
+/// # Environment variables
+///
+/// | Variable | Values | Effect |
+/// |---|---|---|
+/// | `LOG_FORMAT` | `json` | Enable JSON formatter |
+/// | `RUST_LOG_FORMAT` | `json` | Enable JSON formatter (alternative name) |
+///
+/// Both variables are checked; `LOG_FORMAT` takes precedence when both are set.
+pub fn json_format_requested() -> bool {
+    for var in ["LOG_FORMAT", "RUST_LOG_FORMAT"] {
+        if let Ok(val) = std::env::var(var) {
+            return val.trim().eq_ignore_ascii_case("json");
+        }
+    }
+    false
+}
+
 /// Initialise dual logging: pretty console (stderr) + JSON file.
+///
+/// When `LOG_FORMAT=json` or `RUST_LOG_FORMAT=json` is set, the console layer
+/// also emits JSON lines instead of the human-readable Aurora format. This is
+/// useful in container environments where stdout/stderr is captured by a log
+/// aggregator (Loki, Datadog, etc.).
 ///
 /// # Arguments
 ///
@@ -101,54 +129,82 @@ pub fn init(data_dir: &Path, service_name: &str) -> Result<()> {
         .with_context(|| format!("failed to open log file: {}", log_path.display()))?;
 
     let console_ansi = should_colorize();
+    let use_json = json_format_requested();
+
+    let filter = EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info"));
 
     // TEMPLATE: Subscriber stack
     //
     // The stack is built as:
     //   registry()          — the base subscriber that stores span data
     //     .with(env_filter) — shared level filter for ALL layers
-    //     .with(console)    — pretty, colored stderr output
+    //     .with(console)    — pretty or JSON stderr output
     //     .with(file)       — JSON lines file output
     //
     // Both layers share the same filter. To give them independent filters,
     // see `tracing_subscriber::layer::Filtered`.
-    tracing_subscriber::registry()
-        .with(EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info")))
-        .with(
-            // Console layer: pretty, colored, human-readable
-            //
-            // TEMPLATE: Console layer configuration
-            // - `with_ansi(console_ansi)` — enables ANSI codes only when stderr is a TTY
-            //   or FORCE_COLOR is set. The AuroraFormatter reads `writer.has_ansi_escapes()`
-            //   to conditionally apply colors.
-            // - `with_writer(std::io::stderr)` — logs go to stderr, not stdout.
-            //   stdout is reserved for CLI output and MCP JSON streams.
-            // - `.event_format(AuroraFormatter)` — our custom formatter (see formatter.rs)
-            tracing_subscriber::fmt::layer()
-                .with_ansi(console_ansi)
-                .with_writer(std::io::stderr)
-                .event_format(AuroraFormatter),
-        )
-        .with(
-            // File layer: structured JSON, machine-readable
-            //
-            // TEMPLATE: File layer configuration
-            // - `.json()` — emit one JSON object per log line (NDJSON format)
-            // - `.with_ansi(false)` — never emit ANSI codes to the file
-            // - `.with_writer(log_file)` — write to the log file we opened above
-            //
-            // JSON format synapse2:
-            // {"timestamp":"2026-05-13T14:32:01.123Z","level":"INFO","fields":{"message":"starting","bind":"0.0.0.0:3000"}}
-            tracing_subscriber::fmt::layer()
-                .json()
-                .with_ansi(false)
-                .with_writer(log_file),
-        )
-        .init();
+    //
+    // When LOG_FORMAT=json (or RUST_LOG_FORMAT=json) the console layer emits
+    // JSON instead of the human-readable Aurora format. The file layer is
+    // always JSON regardless of this setting.
+    if use_json {
+        // JSON stderr + JSON file — useful in container environments.
+        tracing_subscriber::registry()
+            .with(filter)
+            .with(
+                tracing_subscriber::fmt::layer()
+                    .json()
+                    .with_ansi(false)
+                    .with_writer(std::io::stderr),
+            )
+            .with(
+                tracing_subscriber::fmt::layer()
+                    .json()
+                    .with_ansi(false)
+                    .with_writer(log_file),
+            )
+            .init();
+    } else {
+        // Pretty console (Aurora) + JSON file — default human-readable mode.
+        tracing_subscriber::registry()
+            .with(filter)
+            .with(
+                // Console layer: pretty, colored, human-readable
+                //
+                // TEMPLATE: Console layer configuration
+                // - `with_ansi(console_ansi)` — enables ANSI codes only when stderr is a TTY
+                //   or FORCE_COLOR is set. The AuroraFormatter reads `writer.has_ansi_escapes()`
+                //   to conditionally apply colors.
+                // - `with_writer(std::io::stderr)` — logs go to stderr, not stdout.
+                //   stdout is reserved for CLI output and MCP JSON streams.
+                // - `.event_format(AuroraFormatter)` — our custom formatter (see formatter.rs)
+                tracing_subscriber::fmt::layer()
+                    .with_ansi(console_ansi)
+                    .with_writer(std::io::stderr)
+                    .event_format(AuroraFormatter),
+            )
+            .with(
+                // File layer: structured JSON, machine-readable
+                //
+                // TEMPLATE: File layer configuration
+                // - `.json()` — emit one JSON object per log line (NDJSON format)
+                // - `.with_ansi(false)` — never emit ANSI codes to the file
+                // - `.with_writer(log_file)` — write to the log file we opened above
+                //
+                // JSON format synapse2:
+                // {"timestamp":"2026-05-13T14:32:01.123Z","level":"INFO","fields":{"message":"starting","bind":"0.0.0.0:3000"}}
+                tracing_subscriber::fmt::layer()
+                    .json()
+                    .with_ansi(false)
+                    .with_writer(log_file),
+            )
+            .init();
+    }
 
     tracing::debug!(
         log_file = %log_path.display(),
         ansi = console_ansi,
+        json_format = use_json,
         "logging initialised"
     );
 

@@ -1,7 +1,7 @@
 use super::color::{CYAN_ANSI, PRIMARY_ANSI};
 use catalog::{
-    lookup, nested_lookup, UsageSection, ENVIRONMENT, FLUX_USAGE_SECTIONS, GLOBAL_OPTIONS,
-    QUICK_START, SCOUT_USAGE_SECTIONS, SECTIONS,
+    ENVIRONMENT, FLUX_USAGE_SECTIONS, GLOBAL_OPTIONS, QUICK_START, SCOUT_USAGE_SECTIONS, SECTIONS,
+    UsageSection, lookup, nested_lookup,
 };
 
 const RESET: &str = "\x1b[0m";

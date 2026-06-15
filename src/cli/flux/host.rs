@@ -1,5 +1,5 @@
 use crate::{actions::HostArgs, app::SynapseService};
-use anyhow::{anyhow, Result};
+use anyhow::{Result, anyhow};
 use serde_json::Value;
 
 pub(in crate::cli) async fn run_host(args: &HostArgs, service: &SynapseService) -> Result<Value> {

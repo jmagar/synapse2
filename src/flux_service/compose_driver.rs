@@ -8,12 +8,16 @@ use anyhow::Result;
 use serde_json::Value;
 
 use super::{
-    compose_ops::{self, ComposeLogOptions, DownArgs},
     FluxService,
+    compose_ops::{self, ComposeLogOptions, DownArgs},
 };
 use crate::compose::ComposeProject;
 use crate::elicitation_gate::Confirmer;
 use crate::scout;
+
+#[cfg(test)]
+#[path = "compose_driver_tests.rs"]
+mod tests;
 
 impl FluxService {
     /// Discover compose projects on `host_name`, merging `docker compose ls`

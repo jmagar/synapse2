@@ -29,13 +29,13 @@
 
 use std::collections::HashMap;
 
-use anyhow::{bail, Result};
+use anyhow::{Result, bail};
 use bollard::query_parameters::{
     CreateImageOptions, ListImagesOptions, PruneBuildOptions, PruneContainersOptions,
     PruneImagesOptions, PruneNetworksOptions, PruneVolumesOptions, RemoveImageOptions,
 };
 use futures_util::StreamExt;
-use serde_json::{json, Map, Value};
+use serde_json::{Map, Value, json};
 
 use crate::docker_client::{ContainerOps, ImageOps, NetworkOps, SystemOps, VolumeOps};
 use crate::runtime_budget::SERVICE_PROGRESS_ITEM_CAP;

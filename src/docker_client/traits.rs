@@ -68,7 +68,7 @@ pub trait ContainerOps: Send + Sync {
 
     /// Live resource stats as a stream.
     fn stats(&self, name: &str, options: Option<StatsOptions>)
-        -> BoxStream<ContainerStatsResponse>;
+    -> BoxStream<ContainerStatsResponse>;
 
     /// Lifecycle action by container `name` (start/stop/restart/pause/unpause/
     /// kill/remove). `action` is the bollard endpoint verb; B9 maps user actions

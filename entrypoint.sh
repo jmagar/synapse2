@@ -1,4 +1,4 @@
-#!/bin/sh
+#!/usr/bin/env bash
 # =============================================================================
 # entrypoint.sh — Docker entrypoint for rmcp-template
 #
@@ -25,7 +25,7 @@
 #
 # TEMPLATE: Update REQUIRED_VARS and binary name below.
 # =============================================================================
-set -e
+set -euo pipefail
 
 SERVICE_NAME="synapse"
 BINARY="/usr/local/bin/${SERVICE_NAME}"
@@ -122,7 +122,16 @@ fi
 DOCKER_SOCK="${DOCKER_SOCK:-/var/run/docker.sock}"
 SOCK_GID=""
 if [ -S "${DOCKER_SOCK}" ]; then
-    SOCK_GID="$(stat -c '%g' "${DOCKER_SOCK}" 2>/dev/null || true)"
+    # Detect the GID that owns the docker socket so we can add it as a
+    # supplementary group when dropping privileges. If stat fails (e.g. the
+    # socket exists but is not readable before privilege drop), we fall back
+    # to gosu without the extra group — the service will still start but
+    # Docker operations requiring the socket will fail at runtime.
+    if _gid="$(stat -c '%g' "${DOCKER_SOCK}" 2>/dev/null)"; then
+        SOCK_GID="${_gid}"
+    else
+        echo "WARN: could not read GID of ${DOCKER_SOCK}; Docker socket access may fail" >&2
+    fi
 fi
 
 # drop_exec: re-exec "$@" as UID/GID 1000, preserving the docker socket group.

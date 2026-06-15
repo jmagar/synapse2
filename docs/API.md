@@ -1,8 +1,17 @@
 # synapse2 API
 
-`synapse2` exposes two MCP tools (`flux` and `scout`), a REST action endpoint at
-`POST /v1/synapse2`, and equivalent CLI commands. All three surfaces call the
-same service layer and produce identical results.
+`synapse2` exposes two MCP tools (`flux` and `scout`) and equivalent CLI
+commands. MCP and CLI are the primary surfaces and expose the full 59-action set.
+
+The REST endpoint at `POST /v1/synapse2` is a thin compatibility shim. It routes
+only 14 of the 59 actions: `help`, `scout.nodes`, `scout.peek`, `scout.exec`,
+`flux.container.list`, and the nine `flux.docker.*` subactions
+(`info`, `df`, `images`, `networks`, `volumes`, `pull`, `build`, `rmi`,
+`prune`). All other actions return `UnknownAction` over REST. Use MCP or CLI for
+the full action set.
+
+All surfaces call the same service layer; where an action is reachable over REST,
+it produces the same result as MCP/CLI.
 
 ## MCP Tools
 
@@ -297,3 +306,8 @@ cargo test --test parity -- --nocapture
 ```
 
 Expected output: `synapse-mcp parity: 61 rows parsed → 61 matched, 0 missing`
+
+**Note:** `tests/parity.rs` silently skips when `../synapse-mcp/docs/INVENTORY.md`
+is absent (the sibling repo must be checked out alongside synapse2 for the test to
+run). CI does not currently enforce the sibling repo's presence, so the parity
+guarantee may not run in practice. See `tests/parity.rs:55-72`.

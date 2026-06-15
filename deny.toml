@@ -21,6 +21,7 @@ ignore = [
   # signing only (short-lived tokens, not long-term data encryption), and the
   # server is not exposed to untrusted timing oracles in its normal deployment.
   # Revisit when jsonwebtoken releases a fix or switches to a constant-time impl.
+  # RE-EVALUATE: 2026-12-01 — check jsonwebtoken ≥ 9.4 or lab-auth bump for fix.
   { id = "RUSTSEC-2023-0071", reason = "no fix available; risk accepted for JWT-only usage via lab-auth" },
 ]
 

@@ -1,7 +1,8 @@
 "use client";
 
 import { cva, type VariantProps } from "class-variance-authority";
-import * as React from "react";
+import type { HTMLAttributes, Ref } from "react";
+import { forwardRef, useEffect } from "react";
 import { cn } from "@/lib/utils";
 
 // ---------------------------------------------------------------------------
@@ -58,21 +59,22 @@ const skeletonVariants = cva("aurora-shimmer shrink-0", {
 // ---------------------------------------------------------------------------
 
 export interface SkeletonProps
-  extends React.HTMLAttributes<HTMLDivElement>,
+  extends HTMLAttributes<HTMLDivElement>,
     VariantProps<typeof skeletonVariants> {
   /** Override default width with a Tailwind/inline class */
   width?: string;
+  ref?: Ref<HTMLDivElement>;
 }
 
 // ---------------------------------------------------------------------------
 // Skeleton
 // ---------------------------------------------------------------------------
 
-export const Skeleton = React.forwardRef<HTMLDivElement, SkeletonProps>(function Skeleton(
+export const Skeleton = forwardRef<HTMLDivElement, SkeletonProps>(function Skeleton(
   { variant, width, className, ...rest },
   ref,
 ) {
-  React.useEffect(injectShimmer, []);
+  useEffect(injectShimmer, []);
 
   return (
     <div
@@ -90,13 +92,13 @@ Skeleton.displayName = "Skeleton";
 // SkeletonRow — pre-composed avatar + two text lines + button
 // ---------------------------------------------------------------------------
 
-export type SkeletonRowProps = React.HTMLAttributes<HTMLDivElement>;
+export type SkeletonRowProps = HTMLAttributes<HTMLDivElement> & { ref?: Ref<HTMLDivElement> };
 
-export const SkeletonRow = React.forwardRef<HTMLDivElement, SkeletonRowProps>(function SkeletonRow(
+export const SkeletonRow = forwardRef<HTMLDivElement, SkeletonRowProps>(function SkeletonRow(
   { className, ...rest },
   ref,
 ) {
-  React.useEffect(injectShimmer, []);
+  useEffect(injectShimmer, []);
 
   return (
     <div

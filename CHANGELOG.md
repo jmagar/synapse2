@@ -13,8 +13,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 <!-- TEMPLATE: Add changes here as you work. They move to a version section on release. -->
 
+### Security
+
+- **RBAC scope corrections** — `flux docker pull`, `flux container start/restart/pause/resume/pull`, and `flux compose up/build/pull` are now documented (and enforced) as `synapse:write`. Read-only tokens that appeared to allow these actions will be denied. Enforcement was already write-scoped in practice; this corrects the documentation and schema to match.
+- **Global concurrency cap** — new `SYNAPSE_MCP_MAX_CONCURRENCY` env var (default `50`) caps simultaneous in-flight requests on `/mcp` and `/v1/synapse2`. Excess requests are queued, not rejected. `/health` and `/status` are exempt. Set to `0` to disable.
+- **`/openapi.json` now requires auth** on non-loopback (`Mounted`) deployments to prevent unauthenticated schema enumeration. The endpoint remains public under `LoopbackDev` and `TrustedGatewayUnscoped` policies.
+- **`journalctl` filter args validated** — `unit`, `priority`, `since`, and `until` arguments for `scout logs journal` are now validated before being passed to `journalctl`. Extended priority range syntax (e.g. `err..warning`) is rejected; only the RFC 5424 named levels are accepted.
+- **`scout beam` hardened** — `ssh_user` and `host` are validated; the SSH port is now passed as a separate `-P` flag rather than interpolated into the host string.
+- **Remote `scout peek`/`find`/`delta` reject symlinks** — a pre-read `stat` check over SSH rejects symbolic links before content is read (S-M1 TOCTOU guard).
+- **Secrets redacted in debug output** — `SYNAPSE_MCP_TOKEN` and the Google OAuth client secret are redacted to `[REDACTED]` in all `Debug` formatting and log output.
+- **Loud startup warning** when `SYNAPSE_NOAUTH=true` is active on a non-loopback bind address.
+
+### Fixed
+
+- **REST destructive-op denials return HTTP 403** (was 500) for both flux and scout actions when no elicitation channel is available.
+- **Stale SSH-forwarded Docker sockets evicted on transport death** across all docker/container read operations. Previously only some code paths triggered eviction.
+
 ### Changed
 
+- **JSON logging mode** — set `LOG_FORMAT=json` or `RUST_LOG_FORMAT=json` to emit structured NDJSON log lines instead of the default human-readable format.
+- **Rust edition 2024** — workspace updated to `edition = "2024"`. Release profile now uses `lto = "thin"` and `strip = "symbols"`.
+- **`rust-toolchain.toml` added** — pins the toolchain channel for reproducible builds.
 - **Dropped arm64 support.** The `Docker Publish` workflow previously also built
   `linux/arm64` under QEMU emulation, which made the emulated Rust release build
   exceed the job timeout and cancel every run; it now builds `linux/amd64` only.
@@ -65,8 +84,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- **Reached full synapse-mcp parity (B17)** — all 59 production actions from
-  `synapse-mcp/docs/INVENTORY.md` are now implemented and verified in synapse2:
+- **Reached action-level synapse-mcp parity (B17)** — all 59 production actions from
+  `synapse-mcp/docs/INVENTORY.md` are now implemented and verified in synapse2.
+  Note: some TypeScript-original features are not yet ported (claude/channel
+  notifications, templated MCP resources, root-SSH gate, TOFU fingerprint store,
+  `SYNAPSE_EXCLUDE_HOSTS`, `SYNAPSE_MCP_ALLOW_YOLO`, `SYNAPSE_DEBUG_ERRORS`, `git`
+  in the exec allowlist). See README "Known Parity Gaps" for details.
 
   **`flux docker`** (9 actions): `info`, `df`, `images`, `networks`, `volumes`,
   `pull`, `build`, `rmi`, `prune` — full Docker daemon management including

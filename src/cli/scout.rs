@@ -12,7 +12,7 @@ use crate::{
     elicitation_gate::CliStderrWarn,
     scout_service::logs::{DEFAULT_LINES, MAX_LINES},
 };
-use anyhow::{anyhow, bail, Result};
+use anyhow::{Result, anyhow, bail};
 use serde_json::Value;
 
 use super::Command;

@@ -9,7 +9,7 @@
 //! hands the resulting JSON contract to the `scaffold-project` skill.
 
 use anyhow::Result;
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 
 #[cfg(test)]
 #[path = "scaffold_tests.rs"]
@@ -35,7 +35,8 @@ pub struct ScaffoldIntent {
     pub crawl_search_topics: String,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+#[error("{message}")]
 pub struct ScaffoldIntentValidationError {
     message: String,
 }
@@ -47,14 +48,6 @@ impl ScaffoldIntentValidationError {
         }
     }
 }
-
-impl std::fmt::Display for ScaffoldIntentValidationError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str(&self.message)
-    }
-}
-
-impl std::error::Error for ScaffoldIntentValidationError {}
 
 /// Convert elicited scaffold requirements into the handoff contract consumed by the skill.
 pub fn scaffold_intent(input: ScaffoldIntent) -> Result<Value> {

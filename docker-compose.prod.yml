@@ -37,11 +37,22 @@ services:
       - path: .env
         required: false
     environment:
+      # SYNAPSE_MCP_HOST controls what address the binary binds inside the
+      # container. 0.0.0.0 is correct here so the binary listens on all
+      # container interfaces; the *host-side* exposure is controlled by the
+      # port mapping below.
       SYNAPSE_MCP_HOST: 0.0.0.0
       SYNAPSE_MCP_PORT: "40080"
       SYNAPSE_MCP_TOKEN: "${SYNAPSE_MCP_TOKEN:-}"
     ports:
-      - "${SYNAPSE_MCP_HOST_PORT:-40080}:40080/tcp"
+      # Default: bind to loopback only — not exposed on all interfaces.
+      # Production deployments should sit behind a reverse proxy (SWAG/nginx/Caddy)
+      # which terminates TLS and handles auth. Direct external exposure combined
+      # with SYNAPSE_NOAUTH=true would grant root-equivalent Docker access.
+      # To expose on all interfaces (e.g. when a reverse proxy handles auth
+      # externally), override: SYNAPSE_MCP_BIND_HOST=0.0.0.0 in your .env and
+      # change the mapping to: "${SYNAPSE_MCP_BIND_HOST:-127.0.0.1}:..."
+      - "127.0.0.1:${SYNAPSE_MCP_HOST_PORT:-40080}:40080/tcp"
     volumes:
       # Persistent appdata — config.toml, .env, auth.db, JWT key. The binary reads
       # config.toml / .env from here (it maps to /data inside the container).

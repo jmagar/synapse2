@@ -2,8 +2,8 @@ use serde_json::json;
 
 use crate::{
     actions::{
-        required_scope_for_action, required_scope_for_parsed_action, SynapseAction, READ_SCOPE,
-        WRITE_SCOPE,
+        READ_SCOPE, SynapseAction, WRITE_SCOPE, required_scope_for_action,
+        required_scope_for_parsed_action,
     },
     token_limit::MAX_RESPONSE_BYTES,
 };
@@ -201,9 +201,11 @@ fn rmcp_tool_definitions_include_flux_and_scout_tools() {
     let names: Vec<&str> = tools.iter().map(|tool| tool.name.as_ref()).collect();
 
     assert_eq!(names, ["flux", "scout"]);
-    assert!(tools
-        .iter()
-        .all(|tool| tool.input_schema.contains_key("properties")));
+    assert!(
+        tools
+            .iter()
+            .all(|tool| tool.input_schema.contains_key("properties"))
+    );
 }
 
 #[test]

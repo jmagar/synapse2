@@ -1,8 +1,8 @@
 //! MCP tool response rendering and argument validation helpers.
 
 use rmcp::{
-    model::{CallToolResult, Content},
     ErrorData,
+    model::{CallToolResult, Content},
 };
 use serde_json::Value;
 

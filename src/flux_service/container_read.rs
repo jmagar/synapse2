@@ -31,7 +31,7 @@ use bollard::container::LogOutput;
 use bollard::query_parameters::{ListContainersOptions, LogsOptions, StatsOptions, TopOptions};
 use chrono::Utc;
 use futures_util::StreamExt;
-use serde_json::{json, Map, Value};
+use serde_json::{Map, Value, json};
 
 use crate::docker_client::ContainerOps;
 
@@ -112,19 +112,18 @@ pub async fn list_on_host(
             continue;
         }
         let name = container_name(c);
-        if let Some(nf) = filters.name_filter.as_deref().filter(|s| !s.is_empty()) {
-            if !name.to_ascii_lowercase().contains(&nf.to_ascii_lowercase()) {
-                continue;
-            }
+        if let Some(nf) = filters.name_filter.as_deref().filter(|s| !s.is_empty())
+            && !name.to_ascii_lowercase().contains(&nf.to_ascii_lowercase())
+        {
+            continue;
         }
         let image = c.image.clone().unwrap_or_default();
-        if let Some(imf) = filters.image_filter.as_deref().filter(|s| !s.is_empty()) {
-            if !image
+        if let Some(imf) = filters.image_filter.as_deref().filter(|s| !s.is_empty())
+            && !image
                 .to_ascii_lowercase()
                 .contains(&imf.to_ascii_lowercase())
-            {
-                continue;
-            }
+        {
+            continue;
         }
         out.push(summary_to_value(c, host_name));
     }
@@ -196,10 +195,10 @@ pub fn search_matches(container: &Value, query: &str) -> bool {
             if k.to_ascii_lowercase().contains(&q) {
                 return true;
             }
-            if let Some(val) = v.as_str() {
-                if val.to_ascii_lowercase().contains(&q) {
-                    return true;
-                }
+            if let Some(val) = v.as_str()
+                && val.to_ascii_lowercase().contains(&q)
+            {
+                return true;
             }
         }
     }
@@ -274,7 +273,7 @@ pub async fn stats_on_host(
             return Err(bollard::errors::Error::DockerResponseServerError {
                 status_code: 404,
                 message: format!("no stats for container {container_id}"),
-            })
+            });
         }
     };
     Ok(json!({ "host": host_name, "container": container_id, "stats": stat }))
@@ -364,20 +363,20 @@ pub fn logs_value(host_name: &str, container_id: &str, lines: Vec<String>) -> Va
 pub fn parse_time_spec(spec: &str) -> Result<i32> {
     let spec = spec.trim();
     // Relative form: <digits><unit>
-    if let Some(unit) = spec.chars().last() {
-        if matches!(unit, 's' | 'm' | 'h' | 'd') {
-            let digits = &spec[..spec.len() - 1];
-            if !digits.is_empty() && digits.chars().all(|c| c.is_ascii_digit()) {
-                let value: i64 = digits.parse()?;
-                let mult: i64 = match unit {
-                    's' => 1,
-                    'm' => 60,
-                    'h' => 3600,
-                    _ => 86400,
-                };
-                let now = Utc::now().timestamp();
-                return Ok((now - value * mult) as i32);
-            }
+    if let Some(unit) = spec.chars().last()
+        && matches!(unit, 's' | 'm' | 'h' | 'd')
+    {
+        let digits = &spec[..spec.len() - 1];
+        if !digits.is_empty() && digits.chars().all(|c| c.is_ascii_digit()) {
+            let value: i64 = digits.parse()?;
+            let mult: i64 = match unit {
+                's' => 1,
+                'm' => 60,
+                'h' => 3600,
+                _ => 86400,
+            };
+            let now = Utc::now().timestamp();
+            return Ok((now - value * mult) as i32);
         }
     }
     // Bare unix timestamp.

@@ -9,7 +9,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use anyhow::{bail, Context, Result};
+use anyhow::{Context, Result, bail};
 use openssh::{ForwardType, Session, Socket};
 
 use crate::synapse::HostConfig;
@@ -131,13 +131,17 @@ impl Drop for ForwardedSocket {
 /// SECURITY (security-sentinel, MEDIUM): a world-readable socket would let
 /// other local users connect to the remote docker daemon. The 0600 must
 /// land before the path is exposed to bollard.
+///
+/// Uses `tokio::fs::set_permissions` (non-blocking) so this async function
+/// does not park a Tokio worker thread on a blocking syscall (P-L6).
 pub(super) async fn secure_socket(local_path: &Path) -> Result<()> {
     const MAX_WAIT: Duration = Duration::from_secs(2);
     const POLL: Duration = Duration::from_millis(20);
     let deadline = Instant::now() + MAX_WAIT;
     loop {
         if local_path.exists() {
-            std::fs::set_permissions(local_path, std::fs::Permissions::from_mode(0o600))
+            tokio::fs::set_permissions(local_path, std::fs::Permissions::from_mode(0o600))
+                .await
                 .with_context(|| format!("chmod 0600 forwarded socket {}", local_path.display()))?;
             return Ok(());
         }

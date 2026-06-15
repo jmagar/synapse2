@@ -5,30 +5,34 @@
 //! pure functions live in the `host` sibling module.
 
 use anyhow::Result;
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use std::sync::Arc;
 
 use super::{
+    FluxService,
     container_read::{self, ListFilters},
     docker, flatten_scalar_outcome,
     host::{
-        self, is_local_host, mounts_on_host, network_on_host, resources_on_host, services_on_host,
-        uptime_on_host, CheckResult, CheckStatus, LocalExec, RemoteExec,
+        self, CheckResult, CheckStatus, LocalExec, RemoteExec, is_local_host, mounts_on_host,
+        network_on_host, resources_on_host, services_on_host, uptime_on_host,
     },
-    FluxService,
 };
 use crate::fanout::fanout;
 use crate::scout;
+
+#[cfg(test)]
+#[path = "host_driver_tests.rs"]
+mod tests;
 
 impl FluxService {
     /// Quick connectivity probe: docker info + container count (+ failed services
     /// when systemd is available) per target host(s). Fans out when `host` is None.
     pub async fn host_status(&self, host: Option<&str>) -> Result<Value> {
         let hosts = self.target_hosts(host)?;
-        let clients = &self.docker_clients;
+        let clients = Arc::clone(&self.docker_clients);
         let ssh = Arc::clone(&self.ssh_pool);
         let outcome = fanout(&hosts, move |h| {
-            let clients = clients.clone();
+            let clients = Arc::clone(&clients);
             let ssh = Arc::clone(&ssh);
             let is_local = is_local_host(&h);
             async move {

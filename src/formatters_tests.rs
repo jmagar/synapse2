@@ -11,6 +11,7 @@
 use serde_json::json;
 
 use crate::formatters::{
+    ResponseFormat,
     compose::{
         render_compose_down_markdown, render_compose_list_markdown, render_compose_status_markdown,
         render_compose_up_markdown,
@@ -28,7 +29,6 @@ use crate::formatters::{
         render_scout_exec_markdown, render_scout_nodes_markdown, render_scout_peek_markdown,
         render_scout_syslog_markdown, render_scout_zfs_pools_markdown,
     },
-    ResponseFormat,
 };
 
 // ──────────────────────────────────────────────

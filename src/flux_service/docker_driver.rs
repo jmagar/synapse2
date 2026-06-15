@@ -6,14 +6,21 @@
 
 use anyhow::Result;
 use serde_json::Value;
+use std::sync::Arc;
 
 use super::{
+    FluxService,
     docker::{self, BuildArgs, PruneTarget},
-    flatten_list_outcome, flatten_scalar_outcome, FluxService,
+    flatten_list_outcome, flatten_scalar_outcome,
 };
+use crate::docker_client::is_transport_dead;
 use crate::elicitation_gate::Confirmer;
 use crate::fanout::fanout;
 use crate::scout;
+
+#[cfg(test)]
+#[path = "docker_driver_tests.rs"]
+mod tests;
 
 impl FluxService {
     // ── docker read-only ops (B10) ───────────────────────────────────────
@@ -25,12 +32,20 @@ impl FluxService {
     /// System info across target host(s), fanning out when `host` is unset.
     pub async fn docker_info(&self, host: Option<&str>) -> Result<Value> {
         let hosts = self.target_docker_hosts(host).await?;
-        let clients = &self.docker_clients;
-        let outcome = fanout(&hosts, |h| async move {
-            let client = clients.client_for(&h).await.map_err(|e| e.to_string())?;
-            docker::info_on_host(client.as_ref(), &h.name)
-                .await
-                .map_err(|e| e.to_string())
+        let clients = Arc::clone(&self.docker_clients);
+        let outcome = fanout(&hosts, move |h| {
+            let clients = Arc::clone(&clients);
+            async move {
+                let client = clients.client_for(&h).await.map_err(|e| e.to_string())?;
+                docker::info_on_host(client.as_ref(), &h.name)
+                    .await
+                    .map_err(|e| {
+                        if is_transport_dead(&e) {
+                            clients.invalidate(&h);
+                        }
+                        e.to_string()
+                    })
+            }
         })
         .await;
         Ok(flatten_scalar_outcome(outcome, "info"))
@@ -39,12 +54,20 @@ impl FluxService {
     /// Disk usage (`docker system df`) across target host(s).
     pub async fn docker_df(&self, host: Option<&str>) -> Result<Value> {
         let hosts = self.target_docker_hosts(host).await?;
-        let clients = &self.docker_clients;
-        let outcome = fanout(&hosts, |h| async move {
-            let client = clients.client_for(&h).await.map_err(|e| e.to_string())?;
-            docker::df_on_host(client.as_ref(), &h.name)
-                .await
-                .map_err(|e| e.to_string())
+        let clients = Arc::clone(&self.docker_clients);
+        let outcome = fanout(&hosts, move |h| {
+            let clients = Arc::clone(&clients);
+            async move {
+                let client = clients.client_for(&h).await.map_err(|e| e.to_string())?;
+                docker::df_on_host(client.as_ref(), &h.name)
+                    .await
+                    .map_err(|e| {
+                        if is_transport_dead(&e) {
+                            clients.invalidate(&h);
+                        }
+                        e.to_string()
+                    })
+            }
         })
         .await;
         Ok(flatten_scalar_outcome(outcome, "df"))
@@ -53,12 +76,20 @@ impl FluxService {
     /// List images across target host(s); `dangling_only` adds a server filter.
     pub async fn docker_images(&self, host: Option<&str>, dangling_only: bool) -> Result<Value> {
         let hosts = self.target_docker_hosts(host).await?;
-        let clients = &self.docker_clients;
-        let outcome = fanout(&hosts, |h| async move {
-            let client = clients.client_for(&h).await.map_err(|e| e.to_string())?;
-            docker::images_on_host(client.as_ref(), &h.name, dangling_only)
-                .await
-                .map_err(|e| e.to_string())
+        let clients = Arc::clone(&self.docker_clients);
+        let outcome = fanout(&hosts, move |h| {
+            let clients = Arc::clone(&clients);
+            async move {
+                let client = clients.client_for(&h).await.map_err(|e| e.to_string())?;
+                docker::images_on_host(client.as_ref(), &h.name, dangling_only)
+                    .await
+                    .map_err(|e| {
+                        if is_transport_dead(&e) {
+                            clients.invalidate(&h);
+                        }
+                        e.to_string()
+                    })
+            }
         })
         .await;
         Ok(flatten_list_outcome(outcome, "images"))
@@ -67,12 +98,20 @@ impl FluxService {
     /// List networks across target host(s).
     pub async fn docker_networks(&self, host: Option<&str>) -> Result<Value> {
         let hosts = self.target_docker_hosts(host).await?;
-        let clients = &self.docker_clients;
-        let outcome = fanout(&hosts, |h| async move {
-            let client = clients.client_for(&h).await.map_err(|e| e.to_string())?;
-            docker::networks_on_host(client.as_ref(), &h.name)
-                .await
-                .map_err(|e| e.to_string())
+        let clients = Arc::clone(&self.docker_clients);
+        let outcome = fanout(&hosts, move |h| {
+            let clients = Arc::clone(&clients);
+            async move {
+                let client = clients.client_for(&h).await.map_err(|e| e.to_string())?;
+                docker::networks_on_host(client.as_ref(), &h.name)
+                    .await
+                    .map_err(|e| {
+                        if is_transport_dead(&e) {
+                            clients.invalidate(&h);
+                        }
+                        e.to_string()
+                    })
+            }
         })
         .await;
         Ok(flatten_list_outcome(outcome, "networks"))
@@ -81,12 +120,20 @@ impl FluxService {
     /// List volumes across target host(s).
     pub async fn docker_volumes(&self, host: Option<&str>) -> Result<Value> {
         let hosts = self.target_docker_hosts(host).await?;
-        let clients = &self.docker_clients;
-        let outcome = fanout(&hosts, |h| async move {
-            let client = clients.client_for(&h).await.map_err(|e| e.to_string())?;
-            docker::volumes_on_host(client.as_ref(), &h.name)
-                .await
-                .map_err(|e| e.to_string())
+        let clients = Arc::clone(&self.docker_clients);
+        let outcome = fanout(&hosts, move |h| {
+            let clients = Arc::clone(&clients);
+            async move {
+                let client = clients.client_for(&h).await.map_err(|e| e.to_string())?;
+                docker::volumes_on_host(client.as_ref(), &h.name)
+                    .await
+                    .map_err(|e| {
+                        if is_transport_dead(&e) {
+                            clients.invalidate(&h);
+                        }
+                        e.to_string()
+                    })
+            }
         })
         .await;
         Ok(flatten_list_outcome(outcome, "volumes"))

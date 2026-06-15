@@ -7,10 +7,10 @@
 //! ask the MCP client for user input mid-call. For non-elicitation actions
 //! it is unused.
 
-use rmcp::{service::Peer, RoleServer};
+use rmcp::{RoleServer, service::Peer};
 use serde_json::Value;
 
-use crate::actions::{execute_service_action, SynapseAction};
+use crate::actions::{SynapseAction, execute_service_action};
 use crate::app::SynapseService;
 use crate::elicitation_gate::{Confirmer, McpPeerElicit, NoConfirm};
 use crate::server::AppState;

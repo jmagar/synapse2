@@ -44,7 +44,7 @@
 use std::sync::Arc;
 use std::time::Duration;
 
-use anyhow::{bail, Result};
+use anyhow::{Result, bail};
 use serde::Serialize;
 
 use crate::cache::{Cache, MemoryCache};
@@ -476,12 +476,11 @@ pub fn merge_projects(
 
     // docker-ls wins; backfill its config files from a prior scan entry.
     for mut p in active {
-        if p.config_files.is_empty() {
-            if let Some(prev) = by_name.get(&p.name) {
-                if !prev.config_files.is_empty() {
-                    p.config_files = prev.config_files.clone();
-                }
-            }
+        if p.config_files.is_empty()
+            && let Some(prev) = by_name.get(&p.name)
+            && !prev.config_files.is_empty()
+        {
+            p.config_files = prev.config_files.clone();
         }
         by_name.insert(p.name.clone(), p);
     }

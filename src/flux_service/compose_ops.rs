@@ -25,8 +25,8 @@
 //! `HostExec` seam. Compose resolves the project from `config_file` so `--project-name`
 //! is unnecessary; the `-f` flag is authoritative.
 
-use anyhow::{bail, Result};
-use serde_json::{json, Value};
+use anyhow::{Result, bail};
+use serde_json::{Value, json};
 
 use super::host::HostExec;
 

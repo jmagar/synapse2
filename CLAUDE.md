@@ -28,19 +28,58 @@ REST compatibility endpoint is `POST /v1/synapse2`.
 | `src/flux_service/host.rs` | Pure host exec helpers. |
 | `src/flux_service/compose_ops.rs` | Pure Compose command-building/result helpers. |
 | `src/scout_service.rs` | Scout domain root and shared helpers. |
-| `src/scout_service/` | Scout exec, fs, logs, proc, and zfs implementations. |
-| `src/actions.rs` and `src/actions/` | Typed action parsing, scopes, REST/MCP dispatch metadata. |
+| `src/scout_service/exec.rs` | Scout exec/emit/beam implementations. |
+| `src/scout_service/fs.rs` | Scout filesystem (peek/find/delta) implementations. |
+| `src/scout_service/logs.rs` | Scout log retrieval (syslog/journal/dmesg/auth) implementations. |
+| `src/scout_service/proc.rs` | Scout process/disk (ps/df) implementations. |
+| `src/scout_service/zfs.rs` | Scout ZFS introspection (pools/datasets/snapshots) implementations. |
+| `src/actions.rs` | Top-level action metadata, scope constants, `SynapseAction` enum, shared param helpers. |
+| `src/actions/dispatch.rs` | `execute_service_action` dispatch, error-type helpers. |
+| `src/actions/flux.rs` | Typed flux argument structs and `from_flux_args` parser. |
+| `src/actions/scout.rs` | Typed scout argument structs and `from_scout_args` parser. |
 | `src/mcp/tools.rs` | MCP shim: parse JSON args, call service, return `Value`. |
 | `src/mcp/schemas.rs` | MCP tool JSON schema derived from action metadata. |
-| `src/mcp/help.rs` | Topic help text for every shipped action/subaction. |
+| `src/mcp/help.rs` | Topic index and dispatch for `src/mcp/help_topics.rs`. |
+| `src/mcp/help_topics.rs` | Full topic help text for every shipped action/subaction. |
 | `src/mcp/rmcp_server.rs` | `ServerHandler` impl: tools/resources/prompts and scope checks. |
+| `src/mcp/resources.rs` | MCP resource definitions (`synapse://hosts`, `synapse://compose/projects`, etc.). |
+| `src/mcp/prompts.rs` | MCP prompt definitions. |
+| `src/mcp/response.rs` | MCP response shaping helpers. |
+| `src/mcp/transport.rs` | Streamable HTTP transport wiring and session lifecycle. |
 | `src/server.rs` and `src/server/routes.rs` | HTTP server state, auth policy, Axum routes. |
 | `src/api.rs` | REST compatibility handlers for `/v1/synapse2`, `/health`, `/status`. |
 | `src/config.rs` | `Config`, `McpConfig`, `AuthConfig`, dotenv/env/config loading. |
-| `src/cli.rs` and `src/cli/` | CLI parsing/dispatch, doctor, setup, watch, help. |
-| `src/docker_client.rs` and `src/docker_client/` | Bollard Docker trait surface, cache, mocks, transport. |
+| `src/cli.rs` | CLI entry: mode dispatch, global flags, top-level help. |
+| `src/cli/flux.rs` | CLI flux subcommand parsing and dispatch. |
+| `src/cli/scout.rs` | CLI scout subcommand parsing and dispatch. |
+| `src/cli/doctor.rs` | Pre-flight checks: env, connectivity, config validation. |
+| `src/cli/setup.rs` | Interactive first-run / plugin setup wizard. |
+| `src/cli/watch.rs` | Polls `/health` and emits state-change lines for plugin monitor. |
+| `src/cli/help.rs` | CLI help text rendering. |
+| `src/docker_client.rs` | Docker client module entry: re-exports, mode dispatch. |
+| `src/docker_client/traits.rs` | `DockerClient` and `DockerImageClient` async trait definitions. |
+| `src/docker_client/bollard_client.rs` | Bollard-backed implementation of Docker traits. |
+| `src/docker_client/cache.rs` | Per-host Docker client cache with transport-death eviction. |
+| `src/docker_client/mock.rs` | `MockDockerClient` for unit tests. |
 | `src/ssh.rs` | SSH execution/session pool and forwarded Docker socket support. |
+| `src/ssh/` | SSH pool, config, executor, transport implementations. |
+| `src/fanout.rs` | Cross-host request fan-out with concurrency cap, timeout, and partial-failure handling. |
+| `src/elicitation_gate.rs` | `Confirmer` trait + `MCP`/`Cli`/`NoConfirm`/`DenyConfirm` implementations. |
+| `src/cache.rs` | Generic TTL-keyed async cache shared by Docker client and Compose discovery. |
+| `src/formatters.rs` | Response formatting helpers (table, JSON, markdown). |
+| `src/formatters/` | Per-format and per-action formatter implementations. |
+| `src/logging.rs` | Tracing subscriber setup, log format selection, color policy. |
+| `src/logging/aurora.rs` | Aurora-themed tracing formatter. |
+| `src/logging/formatter.rs` | Generic tracing event formatter. |
+| `src/color_policy.rs` | `NO_COLOR`/`FORCE_COLOR` detection and terminal color capability. |
+| `src/scaffold.rs` | First-run directory/config scaffolding for bare-metal installs. |
+| `src/synapse.rs` | Cross-cutting types and traits shared by flux and scout. |
+| `src/compose.rs` | Compose project discovery and caching logic. |
+| `src/scout.rs` | Scout domain types and shared SSH execution helpers. |
+| `src/docker.rs` | Docker domain types and shared container/image helpers. |
 | `src/token_limit.rs` and `src/runtime_budget.rs` | Response byte caps and operation deadlines. |
+| `src/host_config.rs` | Shared host topology loading from `SYNAPSE_HOSTS_CONFIG`, `SYNAPSE_CONFIG_FILE`, and `~/.ssh/config`. |
+| `src/web.rs` | Optional static web UI: asset serving and SPA fallback. |
 | `src/main.rs` | Mode dispatch: HTTP server, stdio MCP, CLI. |
 | `src/lib.rs` | Public API plus `testing` helpers for integration tests. |
 | `tests/cli_parse.rs` | CLI argument parsing tests. |
@@ -119,6 +158,7 @@ that override on non-loopback binds.
 | `SYNAPSE_MCP_NO_AUTH` | `false` | Disable auth for loopback dev only. |
 | `SYNAPSE_NOAUTH` | `false` | Trusted gateway no-auth mode. |
 | `SYNAPSE_MCP_ALLOW_DESTRUCTIVE` | `false` | Skip destructive confirmation prompts; loopback only. |
+| `SYNAPSE_MCP_MAX_CONCURRENCY` | `50` | Global concurrency cap on `/mcp` and `/v1/synapse2`; excess requests queued. `0` = disable. `/health`/`/status` exempt. |
 | `SYNAPSE_MCP_TOKEN` | unset | Static bearer token. |
 | `SYNAPSE_MCP_ALLOWED_HOSTS` | unset | Extra accepted Host header values. |
 | `SYNAPSE_MCP_ALLOWED_ORIGINS` | unset | Extra CORS origins. |
@@ -127,10 +167,25 @@ that override on non-loopback binds.
 | `SYNAPSE_MCP_GOOGLE_CLIENT_ID` | unset | Google OAuth client id. |
 | `SYNAPSE_MCP_GOOGLE_CLIENT_SECRET` | unset | Google OAuth secret. |
 | `SYNAPSE_MCP_AUTH_ADMIN_EMAIL` | unset | Bootstrap OAuth admin email. |
+| `SYNAPSE_MCP_AUTH_SQLITE_PATH` | `/data/auth.db` | OAuth session/client database path. |
+| `SYNAPSE_MCP_AUTH_KEY_PATH` | `/data/auth-jwt.pem` | OAuth JWT signing key path. |
+| `SYNAPSE_MCP_AUTH_ACCESS_TOKEN_TTL_SECS` | `3600` | OAuth access-token TTL in seconds. |
+| `SYNAPSE_MCP_AUTH_REFRESH_TOKEN_TTL_SECS` | `2592000` | OAuth refresh-token TTL in seconds (30 days). |
+| `SYNAPSE_MCP_AUTH_CODE_TTL_SECS` | `300` | OAuth authorization-code TTL in seconds. |
+| `SYNAPSE_MCP_AUTH_REGISTER_REQUESTS_PER_MINUTE` | `10` | OAuth dynamic-registration rate limit. |
+| `SYNAPSE_MCP_AUTH_AUTHORIZE_REQUESTS_PER_MINUTE` | `60` | OAuth authorization rate limit. |
+| `SYNAPSE_MCP_AUTH_DISABLE_STATIC_TOKEN_WITH_OAUTH` | `true` | Disable static bearer tokens when OAuth is active. |
+| `SYNAPSE_MCP_AUTH_ALLOWED_REDIRECT_URIS` | unset | Extra OAuth redirect URI patterns (comma-separated). |
 | `SYNAPSE_HOSTS_CONFIG` | unset | Inline host topology JSON. |
 | `SYNAPSE_CONFIG_FILE` | unset | Host config file path. |
 | `SYNAPSE_HOME` | platform appdata | Appdata root; defaults to `~/.synapse2` outside containers and `/data` in containers. |
+| `DOCKER_GID` | unset | Host docker group id; required when the Docker socket is mounted in Docker. |
+| `DOCKER_NETWORK` | `mcp` | Docker network name for the production compose stack. |
+| `SYNAPSE2_VERSION` | `latest` | Image tag used by `docker-compose.prod.yml`. |
+| `SYNAPSE_MCP_HOST_PORT` | `40080` | Host port published to the container's MCP port. |
 | `RUST_LOG` | `info` | Tracing filter. |
+| `NO_COLOR` | unset | Disable ANSI color in console output when set. |
+| `FORCE_COLOR` | unset | Force ANSI color even when stderr is not a TTY. |
 
 See `.env.example`, `config.example.toml`, `docs/CONFIG.md`, and `docs/ENV.md`
 for the full runtime contract.

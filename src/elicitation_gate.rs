@@ -36,8 +36,8 @@
 use std::time::Duration;
 
 use rmcp::{
-    service::{ElicitationError, Peer},
     RoleServer,
+    service::{ElicitationError, Peer},
 };
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -71,47 +71,32 @@ rmcp::elicit_safe!(ConfirmDestructive);
 ///
 /// This is a hard error: the destructive operation MUST NOT proceed. Callers at
 /// the MCP boundary map this to `ErrorData::invalid_request`.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum ConfirmationDenied {
     /// The user explicitly declined.
+    #[error("destructive operation declined by user")]
     Declined,
     /// The user cancelled/dismissed the request.
+    #[error("destructive operation confirmation cancelled")]
     Cancelled,
     /// The MCP client does not support elicitation, so confirmation could not
     /// be obtained. (Set `SYNAPSE_MCP_ALLOW_DESTRUCTIVE=true` to override, only
     /// on a trusted/loopback bind.)
+    #[error(
+        "destructive operation requires confirmation, but the client does not support elicitation"
+    )]
     Unsupported,
     /// The confirmation request timed out (no response within [`ELICIT_TIMEOUT`]).
+    #[error("destructive operation confirmation timed out")]
     Timeout,
     /// The user accepted but did not affirm both `confirm` and `understood`.
+    #[error("destructive operation not confirmed (both confirm and understood must be true)")]
     Incomplete,
     /// The elicitation call failed at the protocol/transport level, or the
     /// response could not be parsed.
+    #[error("destructive operation confirmation failed: {0}")]
     Failed(String),
 }
-
-impl std::fmt::Display for ConfirmationDenied {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::Declined => f.write_str("destructive operation declined by user"),
-            Self::Cancelled => f.write_str("destructive operation confirmation cancelled"),
-            Self::Unsupported => f.write_str(
-                "destructive operation requires confirmation, but the client does not support \
-                 elicitation",
-            ),
-            Self::Timeout => f.write_str("destructive operation confirmation timed out"),
-            Self::Incomplete => f.write_str(
-                "destructive operation not confirmed (both confirm and understood \
-                 must be true)",
-            ),
-            Self::Failed(reason) => {
-                write!(f, "destructive operation confirmation failed: {reason}")
-            }
-        }
-    }
-}
-
-impl std::error::Error for ConfirmationDenied {}
 
 // ── the gate trait ────────────────────────────────────────────────────────────
 

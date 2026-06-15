@@ -14,14 +14,14 @@
 //! Output is parsed from the tabular `zpool list` / `zfs list` format into
 //! structured JSON (header + rows + truncated flag), mirroring `proc::ps`.
 
-use anyhow::{bail, Result};
-use serde_json::{json, Value};
+use anyhow::{Result, bail};
+use serde_json::{Value, json};
 
 #[cfg(test)]
 #[path = "zfs_tests.rs"]
 mod tests;
 
-use crate::flux_service::host::{is_local_host, HostExec, LocalExec, RemoteExec};
+use crate::flux_service::host::{HostExec, LocalExec, RemoteExec, is_local_host};
 use crate::ssh::SshExecutor;
 use crate::synapse::HostConfig;
 
@@ -86,13 +86,13 @@ pub async fn datasets(
     dataset_type: Option<&str>,
     recursive: bool,
 ) -> Result<Value> {
-    if let Some(t) = dataset_type {
-        if !VALID_ZFS_TYPES.contains(&t) {
-            bail!(
-                "invalid dataset type `{t}`; must be one of: {}",
-                VALID_ZFS_TYPES.join(", ")
-            );
-        }
+    if let Some(t) = dataset_type
+        && !VALID_ZFS_TYPES.contains(&t)
+    {
+        bail!(
+            "invalid dataset type `{t}`; must be one of: {}",
+            VALID_ZFS_TYPES.join(", ")
+        );
     }
 
     let mut args: Vec<String> = vec!["list".to_owned()];

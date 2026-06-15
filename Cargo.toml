@@ -17,9 +17,9 @@ resolver = "2"
 [package]
 name = "synapse2"
 version = "0.5.2"
-edition = "2021"
+edition = "2024"
 rust-version = "1.90"
-description = "Template for building MCP servers with the rmcp crate"
+description = "Rust MCP and CLI server for local Synapse workflows (flux + scout tools)"
 autobins = false
 
 [[bin]]
@@ -62,7 +62,8 @@ url = "2"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
 
-# HTTP client (stub — replace with your real transport: GraphQL, REST, gRPC, etc.)
+# HTTP client. (Kept at 0.12: reqwest 0.13 renamed the rustls-tls feature flags;
+# deduping with lab-auth's 0.13 is deferred to a focused follow-up.)
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
 
 # Platform dirs — for default_data_dir() (~/.synapse2 detection)
@@ -74,6 +75,11 @@ ssh2-config = "0.7"
 
 # Errors
 anyhow = "1"
+thiserror = "2"
+
+# Tower middleware (direct dep for the custom concurrency-limit Layer in server/routes.rs;
+# already present transitively via axum).
+tower = "0.5"
 
 # SSH transport (scout remote exec + flux forwarded docker socket).
 # process-mux delegates command execution to OpenSSH's mux client, matching the
@@ -101,6 +107,11 @@ include_dir = { version = "0.7", optional = true }
 default = ["web"]
 web = ["include_dir"]
 test-support = []
+
+[profile.release]
+lto = "thin"
+codegen-units = 1
+strip = "symbols"
 
 [dev-dependencies]
 synapse2 = { path = ".", features = ["test-support"] }

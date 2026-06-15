@@ -1,5 +1,5 @@
-use super::checks::check_port_available;
 use super::DoctorCheck;
+use super::checks::check_port_available;
 
 #[test]
 fn check_port_available_passes_for_unused_high_port() {

@@ -1,4 +1,4 @@
-use synapse2::cli::{parse_args_from, Command, SetupCommand};
+use synapse2::cli::{Command, SetupCommand, parse_args_from};
 
 #[test]
 fn setup_and_doctor_still_parse() {

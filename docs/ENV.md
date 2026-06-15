@@ -18,13 +18,6 @@ last_reviewed: "2026-06-12"
 Synapse2 uses `SYNAPSE_*` variables for service configuration and
 `SYNAPSE_MCP_*` variables for MCP server configuration.
 
-## Upstream service
-
-| Variable | Purpose |
-|---|---|
-| `SYNAPSE_API_URL` | Optional upstream API base URL for integrations that need one. |
-| `SYNAPSE_API_KEY` | Optional upstream API key or token. Keep secret. |
-
 ## MCP HTTP server
 
 | Variable | Default | Purpose |
@@ -49,6 +42,7 @@ Synapse2 uses `SYNAPSE_*` variables for service configuration and
 | `SYNAPSE_MCP_AUTH_AUTHORIZE_REQUESTS_PER_MINUTE` | `60` | OAuth authorization rate limit. |
 | `SYNAPSE_MCP_AUTH_DISABLE_STATIC_TOKEN_WITH_OAUTH` | `true` | Disable static bearer tokens when OAuth is active. |
 | `SYNAPSE_MCP_AUTH_ALLOWED_REDIRECT_URIS` | unset | Extra OAuth redirect URI patterns (comma-separated). |
+| `SYNAPSE_MCP_MAX_CONCURRENCY` | `50` | Maximum simultaneous in-flight requests on `/mcp` and `/v1/synapse2`. Excess requests are queued (back-pressure), not rejected. Set to `0` to disable. `/health` and `/status` are exempt. This is a global cap across all clients, not a per-client rate limit. |
 
 ## Host topology
 
@@ -92,8 +86,6 @@ Only required when `SYNAPSE_MCP_AUTH_MODE=oauth`:
 
 ```bash
 # .env — secrets, URLs, and deploy/runtime vars
-SYNAPSE_API_URL=https://api.synapse2.com/v1
-SYNAPSE_API_KEY=your_api_key_here
 
 # MCP auth
 SYNAPSE_MCP_TOKEN=your_bearer_token_here

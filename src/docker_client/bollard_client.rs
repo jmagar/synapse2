@@ -22,15 +22,15 @@ use bollard::query_parameters::{
     PruneBuildOptions, PruneContainersOptions, PruneImagesOptions, PruneNetworksOptions,
     PruneVolumesOptions, RemoveImageOptions, StatsOptions, TopOptions,
 };
-use bollard::{Docker, API_DEFAULT_VERSION};
+use bollard::{API_DEFAULT_VERSION, Docker};
 
-use crate::ssh::{forward_socket_path, ForwardedSocket, PooledSession, SshPool};
+use crate::ssh::{ForwardedSocket, PooledSession, SshPool, forward_socket_path};
 use crate::synapse::HostConfig;
 
+use super::CLIENT_TIMEOUT_SECS;
 use super::traits::{
     BoxStream, ContainerAction, ContainerOps, ImageOps, NetworkOps, SystemOps, VolumeOps,
 };
-use super::CLIENT_TIMEOUT_SECS;
 
 // ---------------------------------------------------------------------------
 // BollardClient — the real implementation + its owned transport guard.

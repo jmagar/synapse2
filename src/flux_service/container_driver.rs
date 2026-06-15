@@ -6,31 +6,43 @@
 //! `container_lifecycle`. Both pure modules are unit-testable with `MockDockerClient`.
 
 use anyhow::Result;
-use serde_json::{json, Value};
+use serde_json::{Value, json};
+use std::sync::Arc;
 
 use super::{
+    FluxService,
     container_lifecycle::{self, ExecParams, RecreateParams},
     container_read::{self, ListFilters, LogOptions},
-    flatten_list_outcome, FluxService,
+    flatten_list_outcome,
 };
-use crate::docker_client::ContainerOps;
+use crate::docker_client::{ContainerOps, is_transport_dead};
 use crate::elicitation_gate::Confirmer;
 use crate::fanout::fanout;
 use crate::scout;
+
+#[cfg(test)]
+#[path = "container_driver_tests.rs"]
+mod tests;
 
 impl FluxService {
     /// List containers across target host(s), fanning out when `host` is unset.
     /// Returns a flat host-tagged container list with a `partial`/`errors` block.
     pub async fn container_list(&self, host: Option<&str>, filters: ListFilters) -> Result<Value> {
         let hosts = self.target_docker_hosts(host).await?;
-        let clients = &self.docker_clients;
-        let outcome = fanout(&hosts, |h| {
+        let clients = Arc::clone(&self.docker_clients);
+        let outcome = fanout(&hosts, move |h| {
+            let clients = Arc::clone(&clients);
             let filters = filters.clone();
             async move {
                 let client = clients.client_for(&h).await.map_err(|e| e.to_string())?;
                 container_read::list_on_host(client.as_ref(), &h.name, &filters)
                     .await
-                    .map_err(|e| e.to_string())
+                    .map_err(|e| {
+                        if is_transport_dead(&e) {
+                            clients.invalidate(&h);
+                        }
+                        e.to_string()
+                    })
             }
         })
         .await;
@@ -40,15 +52,21 @@ impl FluxService {
     /// Full-text search containers (name + image + labels) across target host(s).
     pub async fn container_search(&self, host: Option<&str>, query: &str) -> Result<Value> {
         let hosts = self.target_docker_hosts(host).await?;
-        let clients = &self.docker_clients;
+        let clients = Arc::clone(&self.docker_clients);
         let filters = ListFilters::default();
-        let outcome = fanout(&hosts, |h| {
+        let outcome = fanout(&hosts, move |h| {
+            let clients = Arc::clone(&clients);
             let filters = filters.clone();
             async move {
                 let client = clients.client_for(&h).await.map_err(|e| e.to_string())?;
                 container_read::list_on_host(client.as_ref(), &h.name, &filters)
                     .await
-                    .map_err(|e| e.to_string())
+                    .map_err(|e| {
+                        if is_transport_dead(&e) {
+                            clients.invalidate(&h);
+                        }
+                        e.to_string()
+                    })
             }
         })
         .await;
@@ -59,10 +77,13 @@ impl FluxService {
                 .filter(|c| container_read::search_matches(c, query))
                 .cloned()
                 .collect();
-            let obj = result.as_object_mut().expect("flatten produces an object");
-            obj.insert("count".into(), json!(matches.len()));
-            obj.insert("containers".into(), json!(matches));
-            obj.insert("query".into(), json!(query));
+            // `flatten_list_outcome` always returns a `Value::Object`, so this
+            // branch is always taken. Prefer `if let` over `expect` (H-4).
+            if let Some(obj) = result.as_object_mut() {
+                obj.insert("count".into(), json!(matches.len()));
+                obj.insert("containers".into(), json!(matches));
+                obj.insert("query".into(), json!(query));
+            }
         }
         Ok(result)
     }
@@ -84,23 +105,31 @@ impl FluxService {
         }
         // No id: fan out, collect per-host all-container stats.
         let hosts = self.target_docker_hosts(host).await?;
-        let clients = &self.docker_clients;
-        let outcome = fanout(&hosts, |h| async move {
-            let client = clients.client_for(&h).await.map_err(|e| e.to_string())?;
-            let containers =
-                container_read::list_on_host(client.as_ref(), &h.name, &ListFilters::default())
-                    .await
-                    .map_err(|e| e.to_string())?;
-            let mut stats = Vec::new();
-            for c in &containers {
-                if let Some(id) = c.get("id").and_then(Value::as_str) {
-                    if let Ok(s) = container_read::stats_on_host(client.as_ref(), &h.name, id).await
+        let clients = Arc::clone(&self.docker_clients);
+        let outcome = fanout(&hosts, move |h| {
+            let clients = Arc::clone(&clients);
+            async move {
+                let client = clients.client_for(&h).await.map_err(|e| e.to_string())?;
+                let containers =
+                    container_read::list_on_host(client.as_ref(), &h.name, &ListFilters::default())
+                        .await
+                        .map_err(|e| {
+                            if is_transport_dead(&e) {
+                                clients.invalidate(&h);
+                            }
+                            e.to_string()
+                        })?;
+                let mut stats = Vec::new();
+                for c in &containers {
+                    if let Some(id) = c.get("id").and_then(Value::as_str)
+                        && let Ok(s) =
+                            container_read::stats_on_host(client.as_ref(), &h.name, id).await
                     {
                         stats.push(s);
                     }
                 }
+                Ok::<_, String>(stats)
             }
-            Ok::<_, String>(stats)
         })
         .await;
         Ok(flatten_list_outcome(outcome, "stats"))
@@ -179,7 +208,13 @@ impl FluxService {
             let client = self.docker_clients.client_for(h).await?;
             return op(client.as_ref(), &h.name, container_id)
                 .await
-                .map_err(Into::into);
+                .map_err(|e| {
+                    // Evict stale SSH-forwarded socket so next call rebuilds (T-H3).
+                    if is_transport_dead(&e) {
+                        self.docker_clients.invalidate(h);
+                    }
+                    anyhow::Error::from(e)
+                });
         }
         // Unspecified → probe hosts, first that has the container wins.
         let mut errors: Vec<String> = Vec::new();
@@ -187,7 +222,13 @@ impl FluxService {
             match self.docker_clients.client_for(h).await {
                 Ok(client) => match op(client.as_ref(), &h.name, container_id).await {
                     Ok(value) => return Ok(value),
-                    Err(e) => errors.push(format!("{}: {e}", h.name)),
+                    Err(e) => {
+                        // Evict stale SSH-forwarded socket so next call rebuilds (T-H3).
+                        if is_transport_dead(&e) {
+                            self.docker_clients.invalidate(h);
+                        }
+                        errors.push(format!("{}: {e}", h.name));
+                    }
                 },
                 Err(e) => errors.push(format!("{}: {e}", h.name)),
             }

@@ -94,9 +94,11 @@ fn prune_target_all_confirmation_is_explicit() {
     // generic "are you sure".
     let details = PruneTarget::All.confirmation_details();
     assert!(details.contains("ALL"));
-    assert!(PruneTarget::Volumes
-        .confirmation_details()
-        .contains("DATA LOSS"));
+    assert!(
+        PruneTarget::Volumes
+            .confirmation_details()
+            .contains("DATA LOSS")
+    );
 }
 
 // ───────────────────────────── build validation ─────────────────────────────

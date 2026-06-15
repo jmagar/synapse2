@@ -3,14 +3,14 @@ use std::time::Duration;
 use serde_json::json;
 
 use super::{
-    append_lossy_bounded, cap_service_value, with_deadline, SERVICE_PROGRESS_ITEM_CAP,
-    SERVICE_TEXT_FIELD_BYTE_CAP,
+    SERVICE_PROGRESS_ITEM_CAP, SERVICE_TEXT_FIELD_BYTE_CAP, append_lossy_bounded,
+    cap_service_value, with_deadline,
 };
 
 #[tokio::test]
 async fn with_deadline_times_out_pending_future() {
     let result = with_deadline("test op", Duration::from_millis(5), async {
-        std::future::pending::<Result<(), &'static str>>().await
+        std::future::pending::<Result<(), std::io::Error>>().await
     })
     .await;
 

@@ -1,10 +1,8 @@
-"use client";
-
-import * as React from "react";
+import type { HTMLAttributes, Ref } from "react";
 import { cn } from "@/lib/utils";
 
-const Card = React.forwardRef<HTMLDivElement, React.HTMLAttributes<HTMLDivElement>>(
-  ({ className, style, ...props }, ref) => (
+function Card({ className, style, ref, ...props }: HTMLAttributes<HTMLDivElement> & { ref?: Ref<HTMLDivElement> }) {
+  return (
     <div
       ref={ref}
       className={cn("rounded-[8px] border", className)}
@@ -16,64 +14,63 @@ const Card = React.forwardRef<HTMLDivElement, React.HTMLAttributes<HTMLDivElemen
       }}
       {...props}
     />
-  ),
-);
+  );
+}
 Card.displayName = "Card";
 
-const CardHeader = React.forwardRef<HTMLDivElement, React.HTMLAttributes<HTMLDivElement>>(
-  ({ className, style, ...props }, ref) => (
+function CardHeader({ className, style, ref, ...props }: HTMLAttributes<HTMLDivElement> & { ref?: Ref<HTMLDivElement> }) {
+  return (
     <div
       ref={ref}
       className={cn("border-b px-4 py-3", className)}
       style={{ borderColor: "var(--aurora-border-default)", ...style }}
       {...props}
     />
-  ),
-);
+  );
+}
 CardHeader.displayName = "CardHeader";
 
-const CardTitle = React.forwardRef<HTMLHeadingElement, React.HTMLAttributes<HTMLHeadingElement>>(
-  ({ className, style, ...props }, ref) => (
+function CardTitle({ className, style, ref, ...props }: HTMLAttributes<HTMLHeadingElement> & { ref?: Ref<HTMLHeadingElement> }) {
+  return (
     <h3
       ref={ref}
       className={cn("aurora-text-section", className)}
       style={{ color: "var(--aurora-text-primary)", fontSize: 17, ...style }}
       {...props}
     />
-  ),
-);
+  );
+}
 CardTitle.displayName = "CardTitle";
 
-const CardDescription = React.forwardRef<
-  HTMLParagraphElement,
-  React.HTMLAttributes<HTMLParagraphElement>
->(({ className, style, ...props }, ref) => (
-  <p
-    ref={ref}
-    className={cn("aurora-text-body-sm", className)}
-    style={{ color: "var(--aurora-text-muted)", marginTop: 4, ...style }}
-    {...props}
-  />
-));
+function CardDescription({ className, style, ref, ...props }: HTMLAttributes<HTMLParagraphElement> & { ref?: Ref<HTMLParagraphElement> }) {
+  return (
+    <p
+      ref={ref}
+      className={cn("aurora-text-body-sm", className)}
+      style={{ color: "var(--aurora-text-muted)", marginTop: 4, ...style }}
+      {...props}
+    />
+  );
+}
 CardDescription.displayName = "CardDescription";
 
-const CardContent = React.forwardRef<HTMLDivElement, React.HTMLAttributes<HTMLDivElement>>(
-  ({ className, ...props }, ref) => (
+function CardContent({ className, ref, ...props }: HTMLAttributes<HTMLDivElement> & { ref?: Ref<HTMLDivElement> }) {
+  return (
     <div ref={ref} className={cn("px-4 py-3", className)} {...props} />
-  ),
-);
+  );
+}
 CardContent.displayName = "CardContent";
 
-const CardFooter = React.forwardRef<HTMLDivElement, React.HTMLAttributes<HTMLDivElement>>(
-  ({ className, style, ...props }, ref) => (
+function CardFooter({ className, style, ref, ...props }: HTMLAttributes<HTMLDivElement> & { ref?: Ref<HTMLDivElement> }) {
+  return (
     <div
       ref={ref}
       className={cn("border-t px-4 py-3", className)}
       style={{ borderColor: "var(--aurora-border-default)", ...style }}
       {...props}
     />
-  ),
-);
+  );
+}
 CardFooter.displayName = "CardFooter";
 
 export { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle };

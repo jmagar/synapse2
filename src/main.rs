@@ -11,19 +11,31 @@
 use anyhow::Result;
 use std::sync::Arc;
 
-use rmcp::{transport::stdio, ServiceExt};
+use rmcp::{ServiceExt, transport::stdio};
 use synapse2::{
     app::SynapseService,
     cli,
-    config::{load_dotenv_environment, Config},
+    config::{Config, load_dotenv_environment},
     mcp,
-    server::{self, resolve_auth_policy_kind, AppState, AuthPolicy, AuthPolicyKind},
+    server::{self, AppState, AuthPolicy, AuthPolicyKind, resolve_auth_policy_kind},
 };
 use tracing::info;
-use tracing_subscriber::{fmt, EnvFilter};
+use tracing_subscriber::{EnvFilter, fmt};
 
-#[tokio::main]
-async fn main() -> Result<()> {
+fn main() -> Result<()> {
+    // Load `.env` into the process environment BEFORE starting the Tokio
+    // runtime. `std::env::set_var` is only sound while single-threaded; doing it
+    // here (no runtime, no worker threads, nothing reading the environment
+    // concurrently) keeps the `unsafe` in `load_dotenv_environment` actually safe.
+    load_dotenv_environment()?;
+
+    tokio::runtime::Builder::new_multi_thread()
+        .enable_all()
+        .build()?
+        .block_on(run())
+}
+
+async fn run() -> Result<()> {
     let mut args: Vec<String> = std::env::args().skip(1).collect();
     cli::install_color_from_args(&mut args)?;
 
@@ -39,8 +51,6 @@ async fn main() -> Result<()> {
         _ => {}
     }
 
-    load_dotenv_environment()?;
-
     // Suppress logs in stdio/CLI mode — MCP clients communicate over stdio
     // and cannot tolerate log lines mixed into the JSON stream.
     let stdio_mode = matches!(args.as_slice(), [c] if c == "mcp");
@@ -53,13 +63,31 @@ async fn main() -> Result<()> {
     } else {
         "info"
     };
-    fmt()
-        .with_env_filter(
-            EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new(log_level)),
-        )
-        .with_writer(std::io::stderr)
-        .with_target(true)
-        .init();
+
+    // In stdio and CLI modes use a lightweight inline subscriber.
+    // Stdio mode MUST stay at warn-level so log lines don't corrupt the
+    // JSON-RPC stream on stdout. In serve_mode the full logging::init()
+    // path (with file sink) is used instead — see below.
+    //
+    // When LOG_FORMAT=json or RUST_LOG_FORMAT=json, emit JSON lines so that
+    // container log aggregators (Loki, Datadog, etc.) receive structured data.
+    let json_format = synapse2::logging::json_format_requested();
+    let env_filter =
+        EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new(log_level));
+    if json_format {
+        fmt()
+            .json()
+            .with_env_filter(env_filter)
+            .with_writer(std::io::stderr)
+            .with_target(true)
+            .init();
+    } else {
+        fmt()
+            .with_env_filter(env_filter)
+            .with_writer(std::io::stderr)
+            .with_target(true)
+            .init();
+    }
 
     if serve_mode || stdio_mode {
         // Startup sweep: remove stale forwarded sockets from prior runs whose
@@ -197,7 +225,47 @@ async fn build_state(config: Config) -> Result<AppState> {
 async fn build_auth_policy(config: &Config) -> Result<AuthPolicy> {
     match resolve_auth_policy_kind(config, config.mcp.trusted_gateway)? {
         AuthPolicyKind::LoopbackDev => Ok(AuthPolicy::LoopbackDev),
-        AuthPolicyKind::TrustedGatewayUnscoped => Ok(AuthPolicy::TrustedGatewayUnscoped),
+        AuthPolicyKind::TrustedGatewayUnscoped => {
+            // SECURITY (S-H1): TrustedGatewayUnscoped grants fully-unauthenticated
+            // access to all endpoints — including container exec, scout exec, and
+            // lifecycle operations — with no bearer token, no OAuth, and no proof
+            // that a gateway is actually present. ANY peer that can reach
+            // {}:{} at the network level has complete fleet control.
+            //
+            // Safe only when this port is reachable exclusively by a trusted reverse
+            // proxy (e.g., Labby gateway, SWAG) that enforces its own authentication
+            // and authorization BEFORE forwarding to synapse2. Isolation MUST be
+            // enforced at the network/Docker-network layer (e.g., a Docker internal
+            // network where only the gateway container has access to this port).
+            //
+            // To further restrict which source IPs may reach this server without auth,
+            // set SYNAPSE_TRUSTED_GATEWAY_IP to a comma-separated list of allowed
+            // peer CIDRs/IPs and enforce it at the firewall or reverse-proxy layer.
+            // synapse2 itself does not enforce this IP allowlist at present — it is
+            // a documentation and ops-contract signal only.
+            //
+            // Mitigation checklist:
+            //   1. Run synapse2 on an isolated Docker network; the gateway is the
+            //      only container with access.
+            //   2. Firewall :40080 from all sources except the gateway.
+            //   3. Set SYNAPSE_TRUSTED_GATEWAY_IP to the gateway's IP for ops
+            //      documentation (not yet enforced in-process; see TODO below).
+            //   4. Rotate credentials if this port was ever inadvertently exposed.
+            tracing::warn!(
+                bind = %config.mcp.bind_addr(),
+                "SECURITY: TrustedGatewayUnscoped mode active (SYNAPSE_NOAUTH=true). \
+                 All requests on {} are accepted without authentication. \
+                 This is ONLY safe when a trusted reverse proxy (e.g., Labby) is the \
+                 sole network peer that can reach this port. \
+                 Ensure this port is on an isolated Docker network or firewall-restricted. \
+                 Set SYNAPSE_TRUSTED_GATEWAY_IP to document the expected gateway IP.",
+                config.mcp.bind_addr(),
+            );
+            // TODO(S-H1): enforce SYNAPSE_TRUSTED_GATEWAY_IP as a peer-addr allowlist
+            // once axum ConnectInfo is threaded through to the handler layer, so that
+            // connections from unexpected source IPs are refused at the TCP level.
+            Ok(AuthPolicy::TrustedGatewayUnscoped)
+        }
         AuthPolicyKind::MountedBearer => Ok(AuthPolicy::Mounted { auth_state: None }),
         AuthPolicyKind::MountedOAuth => {
             let auth_cfg = lab_auth::config::AuthConfigBuilder::new()

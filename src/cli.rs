@@ -12,12 +12,12 @@
 
 use crate::{
     actions::{
-        rest_help, ContainerArgs, DockerArgs, ScoutBeamArgs, ScoutDeltaArgs, ScoutEmitArgs,
-        ScoutExecArgs, ScoutFindArgs, ScoutLogsArgs, ScoutPsArgs, ScoutZfsArgs,
+        ContainerArgs, DockerArgs, ScoutBeamArgs, ScoutDeltaArgs, ScoutEmitArgs, ScoutExecArgs,
+        ScoutFindArgs, ScoutLogsArgs, ScoutPsArgs, ScoutZfsArgs, rest_help,
     },
     app::SynapseService,
 };
-use anyhow::{anyhow, Result};
+use anyhow::{Result, anyhow};
 
 // TEMPLATE: The doctor module is the §48 reference implementation.
 //           Import it from here and wire into run() below.
@@ -29,7 +29,7 @@ mod scout;
 pub mod setup;
 pub mod watch;
 
-pub use setup::{run_setup, SetupCommand};
+pub use setup::{SetupCommand, run_setup};
 
 pub fn usage() -> String {
     help::render_top_level(false)

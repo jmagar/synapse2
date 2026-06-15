@@ -531,3 +531,77 @@ fn ssh_config_include_directives_are_expanded() {
         "included_host missing — ssh2-config may have lost native Include support: {hosts:?}"
     );
 }
+
+// ---------------------------------------------------------------------------
+// Protocol validation — Http/Https rejected at load time (A-H3 / S-M6)
+// ---------------------------------------------------------------------------
+
+#[test]
+fn http_protocol_host_is_rejected_at_load() {
+    let json = serde_json::to_string(&serde_json::json!([{
+        "name": "badhost",
+        "host": "10.0.0.1",
+        "protocol": "http"
+    }]))
+    .unwrap();
+    let repo = FileHostRepository::for_test(Some(json), Vec::new(), None);
+    let result = repo.load_hosts();
+    assert!(
+        result.is_err(),
+        "http protocol must be rejected at load time"
+    );
+    let msg = result.unwrap_err().to_string();
+    assert!(
+        msg.contains("http") && msg.contains("not supported"),
+        "error should mention 'http' and 'not supported', got: {msg}"
+    );
+}
+
+#[test]
+fn https_protocol_host_is_rejected_at_load() {
+    let json = serde_json::to_string(&serde_json::json!([{
+        "name": "badhost",
+        "host": "10.0.0.1",
+        "protocol": "https"
+    }]))
+    .unwrap();
+    let repo = FileHostRepository::for_test(Some(json), Vec::new(), None);
+    let result = repo.load_hosts();
+    assert!(
+        result.is_err(),
+        "https protocol must be rejected at load time"
+    );
+    let msg = result.unwrap_err().to_string();
+    assert!(
+        msg.contains("https") && msg.contains("not supported"),
+        "error should mention 'https' and 'not supported', got: {msg}"
+    );
+}
+
+#[test]
+fn reject_unsupported_protocol_allows_local_and_ssh() {
+    let local = HostConfig::local();
+    assert!(
+        reject_unsupported_protocol(&local).is_ok(),
+        "local protocol should be accepted"
+    );
+    let ssh_host = HostConfig {
+        name: "sshbox".into(),
+        host: "10.0.0.2".into(),
+        port: None,
+        protocol: HostProtocol::Ssh,
+        ssh_user: None,
+        ssh_key_path: None,
+        ssh_port: None,
+        ssh_config_path: None,
+        docker_socket_path: None,
+        tags: Vec::new(),
+        compose_search_paths: Vec::new(),
+        scout_read_roots: Vec::new(),
+        exec_allowlist: Vec::new(),
+    };
+    assert!(
+        reject_unsupported_protocol(&ssh_host).is_ok(),
+        "ssh protocol should be accepted"
+    );
+}

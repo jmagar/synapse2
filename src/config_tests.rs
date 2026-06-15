@@ -47,7 +47,9 @@ impl EnvSnapshot {
             .map(|key| (*key, std::env::var(key).ok()))
             .collect();
         for key in keys {
-            std::env::remove_var(key);
+            unsafe {
+                std::env::remove_var(key);
+            }
         }
         Self { values }
     }
@@ -57,9 +59,13 @@ impl Drop for EnvSnapshot {
     fn drop(&mut self) {
         for (key, value) in &self.values {
             if let Some(value) = value {
-                std::env::set_var(key, value);
+                unsafe {
+                    std::env::set_var(key, value);
+                }
             } else {
-                std::env::remove_var(key);
+                unsafe {
+                    std::env::remove_var(key);
+                }
             }
         }
     }
@@ -138,10 +144,14 @@ fn is_loopback_subdomain_is_false() {
 // Each test uses a distinct key to avoid collisions with parallel test threads.
 
 fn call_env_bool(key: &str, raw: &str) -> anyhow::Result<bool> {
-    std::env::set_var(key, raw);
+    unsafe {
+        std::env::set_var(key, raw);
+    }
     let mut target = false;
     let result = env_bool(key, &mut target);
-    std::env::remove_var(key);
+    unsafe {
+        std::env::remove_var(key);
+    }
     result.map(|_| target)
 }
 
@@ -184,10 +194,14 @@ fn env_bool_rejects_invalid() {
 // ── env_list helper ───────────────────────────────────────────────────────────
 
 fn call_env_list(key: &str, raw: &str) -> Vec<String> {
-    std::env::set_var(key, raw);
+    unsafe {
+        std::env::set_var(key, raw);
+    }
     let mut target: Vec<String> = Vec::new();
     env_list(key, &mut target);
-    std::env::remove_var(key);
+    unsafe {
+        std::env::remove_var(key);
+    }
     target
 }
 
@@ -206,10 +220,14 @@ fn env_list_trims_spaces_around_commas() {
 #[test]
 fn env_list_empty_string_leaves_target_unchanged() {
     // An empty env var should not overwrite an existing target
-    std::env::set_var("TEST_ENV_LIST_EMPTY", "");
+    unsafe {
+        std::env::set_var("TEST_ENV_LIST_EMPTY", "");
+    }
     let mut target = vec!["existing".to_string()];
     env_list("TEST_ENV_LIST_EMPTY", &mut target);
-    std::env::remove_var("TEST_ENV_LIST_EMPTY");
+    unsafe {
+        std::env::remove_var("TEST_ENV_LIST_EMPTY");
+    }
     assert_eq!(
         target,
         vec!["existing"],
@@ -264,7 +282,9 @@ fn dotenv_quoted_values_unescape_quotes_and_backslashes() {
 fn config_load_reads_synapse_home_config() {
     let (_lock, _env) = locked_env();
     let appdata = tempfile::tempdir().unwrap();
-    std::env::set_var("SYNAPSE_HOME", appdata.path());
+    unsafe {
+        std::env::set_var("SYNAPSE_HOME", appdata.path());
+    }
 
     std::fs::write(
         appdata.path().join("config.toml"),
@@ -299,7 +319,9 @@ fn config_example_toml_matches_typed_schema() {
 fn dotenv_precedence_dirs_apply_cwd_before_synapse_home() {
     let (_lock, _env) = locked_env();
     let appdata = tempfile::tempdir().unwrap();
-    std::env::set_var("SYNAPSE_HOME", appdata.path());
+    unsafe {
+        std::env::set_var("SYNAPSE_HOME", appdata.path());
+    }
 
     let dirs = dotenv_precedence_dirs();
     assert_eq!(
@@ -312,8 +334,12 @@ fn dotenv_precedence_dirs_apply_cwd_before_synapse_home() {
 fn load_dotenv_environment_seeds_runtime_vars_without_overriding_process_env() {
     let (_lock, _env) = locked_env();
     let appdata = tempfile::tempdir().unwrap();
-    std::env::set_var("SYNAPSE_HOME", appdata.path());
-    std::env::set_var("RUST_LOG", "warn");
+    unsafe {
+        std::env::set_var("SYNAPSE_HOME", appdata.path());
+    }
+    unsafe {
+        std::env::set_var("RUST_LOG", "warn");
+    }
 
     std::fs::write(
         appdata.path().join(".env"),
@@ -370,20 +396,28 @@ fn allow_destructive_defaults_false() {
 #[test]
 fn allow_destructive_env_parse_strict_true() {
     // Rust's str::parse::<bool> accepts "true" (case-insensitive)
-    std::env::set_var("TEST_ALLOW_DESTRUCTIVE_TRUE", "true");
+    unsafe {
+        std::env::set_var("TEST_ALLOW_DESTRUCTIVE_TRUE", "true");
+    }
     let mut target = false;
     let result = env_bool("TEST_ALLOW_DESTRUCTIVE_TRUE", &mut target);
-    std::env::remove_var("TEST_ALLOW_DESTRUCTIVE_TRUE");
+    unsafe {
+        std::env::remove_var("TEST_ALLOW_DESTRUCTIVE_TRUE");
+    }
     assert!(result.is_ok());
     assert!(target, "\"true\" should parse to true");
 }
 
 #[test]
 fn allow_destructive_env_parse_strict_false() {
-    std::env::set_var("TEST_ALLOW_DESTRUCTIVE_FALSE", "false");
+    unsafe {
+        std::env::set_var("TEST_ALLOW_DESTRUCTIVE_FALSE", "false");
+    }
     let mut target = true;
     let result = env_bool("TEST_ALLOW_DESTRUCTIVE_FALSE", &mut target);
-    std::env::remove_var("TEST_ALLOW_DESTRUCTIVE_FALSE");
+    unsafe {
+        std::env::remove_var("TEST_ALLOW_DESTRUCTIVE_FALSE");
+    }
     assert!(result.is_ok());
     assert!(!target, "\"false\" should parse to false");
 }
@@ -393,9 +427,13 @@ fn allow_destructive_env_parse_rejects_invalid() {
     // Invalid values like "1", "yes", "TRUE" should error or fail gracefully
     // env_bool accepts "1" as true for compatibility, but strict parsing would reject it
     // For now we test that the function handles it
-    std::env::set_var("TEST_ALLOW_DESTRUCTIVE_MAYBE", "maybe");
+    unsafe {
+        std::env::set_var("TEST_ALLOW_DESTRUCTIVE_MAYBE", "maybe");
+    }
     let mut target = false;
     let result = env_bool("TEST_ALLOW_DESTRUCTIVE_MAYBE", &mut target);
-    std::env::remove_var("TEST_ALLOW_DESTRUCTIVE_MAYBE");
+    unsafe {
+        std::env::remove_var("TEST_ALLOW_DESTRUCTIVE_MAYBE");
+    }
     assert!(result.is_err(), "\"maybe\" should not be a valid bool");
 }

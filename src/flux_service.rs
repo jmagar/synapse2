@@ -20,13 +20,13 @@
 //! - `flux_service/{container_read,docker,host,compose_ops}.rs` — pure per-host fns.
 
 use anyhow::Result;
-use serde_json::{json, Map, Value};
+use serde_json::{Map, Value, json};
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
 use crate::compose::ComposeDiscovery;
 use crate::docker_client::DockerClientCache;
-use crate::fanout::{fanout, FanoutOutcome};
+use crate::fanout::{FanoutOutcome, fanout};
 use crate::host_config::HostRepository;
 use crate::mcp::help as help_module;
 use crate::scout;
@@ -48,8 +48,8 @@ pub use compose_ops::{ComposeLogOptions, DownArgs};
 pub use container_read::{ListFilters, LogOptions};
 pub use docker::{BuildArgs, PruneTarget};
 pub use host::{
-    info_on_host, is_local_host, mounts_on_host, network_on_host, resources_on_host,
-    services_on_host, uptime_on_host, CheckResult, CheckStatus, LocalExec, RemoteExec,
+    CheckResult, CheckStatus, LocalExec, RemoteExec, info_on_host, is_local_host, mounts_on_host,
+    network_on_host, resources_on_host, services_on_host, uptime_on_host,
 };
 
 #[cfg(test)]
@@ -75,6 +75,10 @@ pub struct FluxService {
 
 impl FluxService {
     /// Construct with the supplied host repository and default discovery / client caches.
+    ///
+    /// A single [`SshPool`] is created and shared by the compose discovery engine,
+    /// the Docker client cache (for SSH-forwarded remote sockets), and the host-exec
+    /// seam — collapsing what were three independent pools into one (`C-1`/`P-C1`).
     pub fn new(host_repo: Arc<dyn HostRepository>) -> Self {
         let ssh_pool = Arc::new(SshPool::new());
         Self {
@@ -82,9 +86,15 @@ impl FluxService {
             compose: Arc::new(ComposeDiscovery::new(
                 Arc::clone(&ssh_pool) as Arc<dyn crate::ssh::SshExecutor>
             )),
-            docker_clients: Arc::new(DockerClientCache::new()),
+            docker_clients: Arc::new(DockerClientCache::with_pool(Arc::clone(&ssh_pool))),
             ssh_pool,
         }
+    }
+
+    /// Expose the shared SSH pool so callers (e.g. `SynapseService::new`) can
+    /// pass it to the scout service, completing the single-pool topology.
+    pub fn ssh_pool(&self) -> Arc<SshPool> {
+        Arc::clone(&self.ssh_pool)
     }
 
     /// Return help for the flux tool.
@@ -121,12 +131,15 @@ impl FluxService {
             return Ok(hosts);
         }
 
-        let clients = &self.docker_clients;
-        let discovery = fanout(&hosts, |h| async move {
-            let client = clients.client_for(&h).await.map_err(|e| e.to_string())?;
-            docker::daemon_id(client.as_ref())
-                .await
-                .map_err(|e| e.to_string())
+        let clients = Arc::clone(&self.docker_clients);
+        let discovery = fanout(&hosts, move |h| {
+            let clients = Arc::clone(&clients);
+            async move {
+                let client = clients.client_for(&h).await.map_err(|e| e.to_string())?;
+                docker::daemon_id(client.as_ref())
+                    .await
+                    .map_err(|e| e.to_string())
+            }
         })
         .await;
         let daemon_ids = daemon_discovery_results(discovery);

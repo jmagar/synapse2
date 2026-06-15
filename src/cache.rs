@@ -102,15 +102,14 @@ where
     ///
     /// Simple heuristic: remove the entry with the oldest `inserted_at`.
     fn evict_oldest(&self) {
-        if self.store.len() >= self.max_entries {
-            if let Some((oldest_key, _)) = self
+        if self.store.len() >= self.max_entries
+            && let Some((oldest_key, _)) = self
                 .store
                 .iter()
                 .min_by_key(|item| item.value().inserted_at)
                 .map(|item| (item.key().clone(), item.value().clone()))
-            {
-                let _ = self.store.remove(&oldest_key);
-            }
+        {
+            let _ = self.store.remove(&oldest_key);
         }
     }
 }

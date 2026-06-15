@@ -394,6 +394,158 @@ fn auth_applies_grep_filter() {
     assert!(!output.contains("publickey"), "should filter sshd lines");
 }
 
+// ─── journalctl arg injection tests (S-H3) ───────────────────────────────────
+
+#[test]
+fn journal_unit_leading_dash_is_rejected() {
+    // unit = "-M container" would cause journalctl to read another machine's
+    // journal via a systemd-machined socket.
+    let result = super::validate_journal_unit("-M container");
+    assert!(result.is_err(), "leading-dash unit must be rejected");
+    let msg = result.unwrap_err().to_string();
+    assert!(
+        msg.contains("start with `-`") || msg.contains("leading"),
+        "{msg}"
+    );
+}
+
+#[test]
+fn journal_unit_with_nul_byte_is_rejected() {
+    let result = super::validate_journal_unit("ssh\0d");
+    assert!(result.is_err(), "NUL in unit must be rejected");
+    let msg = result.unwrap_err().to_string();
+    assert!(msg.contains("NUL"), "{msg}");
+}
+
+#[test]
+fn journal_unit_over_length_is_rejected() {
+    let long_unit = "a".repeat(super::UNIT_MAX_LEN + 1);
+    let result = super::validate_journal_unit(&long_unit);
+    assert!(result.is_err(), "over-length unit must be rejected");
+}
+
+#[test]
+fn journal_unit_normal_value_is_accepted() {
+    assert!(super::validate_journal_unit("sshd").is_ok());
+    assert!(super::validate_journal_unit("nginx.service").is_ok());
+    assert!(super::validate_journal_unit("docker").is_ok());
+}
+
+#[test]
+fn journal_priority_known_names_accepted() {
+    for p in &[
+        "emerg", "alert", "crit", "err", "warning", "notice", "info", "debug",
+    ] {
+        assert!(
+            super::validate_journal_priority(p).is_ok(),
+            "priority {p:?} should be accepted"
+        );
+    }
+    for p in &["0", "1", "2", "3", "4", "5", "6", "7"] {
+        assert!(
+            super::validate_journal_priority(p).is_ok(),
+            "numeric priority {p:?} should be accepted"
+        );
+    }
+}
+
+#[test]
+fn journal_priority_unknown_value_is_rejected() {
+    let result = super::validate_journal_priority("trace");
+    assert!(
+        result.is_err(),
+        "`trace` must be rejected (not a syslog level)"
+    );
+}
+
+#[test]
+fn journal_priority_flag_injection_is_rejected() {
+    // Attempt to smuggle --output=json through the priority slot.
+    let result = super::validate_journal_priority("--output=json");
+    assert!(
+        result.is_err(),
+        "option injection via priority must be rejected"
+    );
+}
+
+#[test]
+fn journal_time_filter_leading_double_dash_is_rejected() {
+    // "--output=json" must not sneak through as a since/until value.
+    let result = super::validate_journal_time_filter("--output=json");
+    assert!(
+        result.is_err(),
+        "leading `--` in time filter must be rejected"
+    );
+    let msg = result.unwrap_err().to_string();
+    assert!(msg.contains("--") || msg.contains("start with"), "{msg}");
+}
+
+#[test]
+fn journal_time_filter_nul_byte_is_rejected() {
+    let result = super::validate_journal_time_filter("2026-01-01\0");
+    assert!(result.is_err(), "NUL in time filter must be rejected");
+}
+
+#[test]
+fn journal_time_filter_over_length_is_rejected() {
+    let long_val = "x".repeat(super::TIME_FILTER_MAX_LEN + 1);
+    let result = super::validate_journal_time_filter(&long_val);
+    assert!(result.is_err(), "over-length time filter must be rejected");
+}
+
+#[test]
+fn journal_time_filter_normal_values_accepted() {
+    assert!(super::validate_journal_time_filter("2026-05-29 00:00:00").is_ok());
+    assert!(super::validate_journal_time_filter("yesterday").is_ok());
+    assert!(super::validate_journal_time_filter("-1h").is_ok());
+}
+
+#[test]
+fn journal_rejects_unit_with_leading_dash() {
+    // End-to-end: journal() must reject the call before building argv.
+    let rt = tokio::runtime::Runtime::new().unwrap();
+    let host = ssh_host();
+    let exec = FixedExec::ok("");
+
+    let result = rt.block_on(super::journal(
+        &host,
+        &exec,
+        100,
+        Some("-M container"),
+        None,
+        None,
+        None,
+        None,
+    ));
+    assert!(result.is_err(), "journal must reject leading-dash unit");
+    let msg = result.unwrap_err().to_string();
+    assert!(msg.contains("`-`") || msg.contains("start with"), "{msg}");
+}
+
+#[test]
+fn journal_rejects_whitespace_leading_dash_unit() {
+    // Even if someone splits "  -M" they cannot get a leading dash through the
+    // trim because the validator checks the raw value, not a trimmed one.
+    let rt = tokio::runtime::Runtime::new().unwrap();
+    let host = ssh_host();
+    let exec = FixedExec::ok("");
+
+    let result = rt.block_on(super::journal(
+        &host,
+        &exec,
+        100,
+        Some("-oProxyCommand=evil"),
+        None,
+        None,
+        None,
+        None,
+    ));
+    assert!(
+        result.is_err(),
+        "leading-dash unit variant must be rejected"
+    );
+}
+
 // ─── apply_grep helper ────────────────────────────────────────────────────────
 
 #[test]

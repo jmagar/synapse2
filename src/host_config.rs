@@ -199,6 +199,12 @@ impl HostRepository for FileHostRepository {
             explicit = self.load_from_files()?;
         }
 
+        // Reject unsupported protocols early — Http/Https would silently route
+        // as SSH otherwise (A-H3 / S-M6).
+        for host in &explicit {
+            reject_unsupported_protocol(host)?;
+        }
+
         // Step 2: SSH auto-discovery (additive, explicit wins on name conflict).
         let ssh_hosts = self.load_from_ssh_config();
         let hosts = merge_hosts(explicit, ssh_hosts);
@@ -321,6 +327,33 @@ pub fn ensure_local(mut hosts: Vec<HostConfig>) -> Vec<HostConfig> {
         hosts.push(HostConfig::local());
     }
     hosts
+}
+
+// ---------------------------------------------------------------------------
+// Protocol validation
+// ---------------------------------------------------------------------------
+
+/// Reject hosts whose protocol is `http` or `https`.
+///
+/// These variants exist in the `HostProtocol` enum but have never been
+/// implemented. Accepting them silently causes them to be routed as SSH
+/// (the else-branch in dispatch), which is a silent misconfiguration.
+/// Fail loudly at load time instead (A-H3 / S-M6).
+pub fn reject_unsupported_protocol(host: &HostConfig) -> Result<()> {
+    match host.protocol {
+        HostProtocol::Http | HostProtocol::Https => {
+            anyhow::bail!(
+                "host '{}': protocol '{}' is not supported; use 'local' or 'ssh'",
+                host.name,
+                match host.protocol {
+                    HostProtocol::Http => "http",
+                    HostProtocol::Https => "https",
+                    _ => unreachable!(),
+                }
+            )
+        }
+        _ => Ok(()),
+    }
 }
 
 // ---------------------------------------------------------------------------

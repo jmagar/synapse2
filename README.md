@@ -29,7 +29,7 @@ commands, covering all 59 production actions from the original TypeScript server
 | `images` | `synapse:read` | List Docker images; `dangling_only` to filter untagged |
 | `networks` | `synapse:read` | List Docker networks |
 | `volumes` | `synapse:read` | List Docker volumes |
-| `pull` | `synapse:read` | Pull a Docker image; requires `host`, `image` |
+| `pull` | `synapse:write` | Pull a Docker image; requires `host`, `image` |
 | `build` | `synapse:write` | Build a Docker image; requires `host`, `context`, `tag`; optional `dockerfile`, `no_cache` |
 | `rmi` | `synapse:write` | Remove a Docker image; requires `host`, `image`, `force=true` |
 | `prune` | `synapse:write` | Remove unused resources; requires `host`, `prune_target`, `force=true` |
@@ -44,12 +44,12 @@ commands, covering all 59 production actions from the original TypeScript server
 | `stats` | `synapse:read` | Resource usage stats; optional `container_id` |
 | `top` | `synapse:read` | Show running processes; requires `container_id` |
 | `search` | `synapse:read` | Full-text search by name/image/labels; requires `query` |
-| `start` | `synapse:read` | Start a stopped container; requires `container_id` |
+| `start` | `synapse:write` | Start a stopped container; requires `container_id` |
 | `stop` | `synapse:write` | Stop a running container (destructive); requires `container_id` |
-| `restart` | `synapse:read` | Restart a container; requires `container_id` |
-| `pause` | `synapse:read` | Pause a running container; requires `container_id` |
-| `resume` | `synapse:read` | Resume a paused container; requires `container_id` |
-| `pull` | `synapse:read` | Pull latest image for a container; requires `container_id` |
+| `restart` | `synapse:write` | Restart a container; requires `container_id` |
+| `pause` | `synapse:write` | Pause a running container; requires `container_id` |
+| `resume` | `synapse:write` | Resume a paused container; requires `container_id` |
+| `pull` | `synapse:write` | Pull latest image for a container; requires `container_id` |
 | `recreate` | `synapse:write` | Recreate container with image pull (destructive); requires `container_id`; optional `pull` (default true) |
 | `exec` | `synapse:write` | Execute command inside container (destructive, execvp); requires `container_id`, `command` array |
 
@@ -73,13 +73,13 @@ commands, covering all 59 production actions from the original TypeScript server
 |---|---|---|
 | `list` | `synapse:read` | List all Docker Compose projects; requires `host` |
 | `status` | `synapse:read` | Get project service status; requires `host`, `project`; optional `service` |
-| `up` | `synapse:read` | Start a compose project; requires `host`, `project` |
+| `up` | `synapse:write` | Start a compose project; requires `host`, `project` |
 | `down` | `synapse:write` | Stop a compose project (destructive); requires `host`, `project`; optional `remove_volumes`, `force` |
 | `restart` | `synapse:write` | Restart a compose project (destructive); requires `host`, `project` |
 | `recreate` | `synapse:write` | Recreate compose containers (destructive); requires `host`, `project` |
 | `logs` | `synapse:read` | Get project logs; requires `host`, `project`; optional `service`, `lines`, `since` |
-| `build` | `synapse:read` | Build compose project images; requires `host`, `project`; optional `service` |
-| `pull` | `synapse:read` | Pull compose project images; requires `host`, `project`; optional `service` |
+| `build` | `synapse:write` | Build compose project images; requires `host`, `project`; optional `service` |
+| `pull` | `synapse:write` | Pull compose project images; requires `host`, `project`; optional `service` |
 | `refresh` | `synapse:read` | Refresh compose project cache; requires `host` |
 
 #### `flux help` — Auto-generated flux docs
@@ -129,6 +129,25 @@ commands, covering all 59 production actions from the original TypeScript server
 |---|---|---|
 | `help` | public | Return scout action reference; optional `topic` (e.g. `"zfs:pools"`), `format` (`markdown`\|`json`) |
 
+## Known Parity Gaps
+
+`synapse2` achieves **action-level parity** with `synapse-mcp` — all 59
+production actions from `synapse-mcp/docs/INVENTORY.md` are implemented. However,
+the following features from the original TypeScript server are **not yet ported**:
+
+### Not ported
+
+| Feature | Description |
+|---|---|
+| `claude/channel` notifications | Original forwards Docker events and log tails as `notifications/claude/channel` MCP notifications. No equivalent exists in Rust. |
+| Templated MCP resources | Original exposes `synapse://hosts/{host}`, `synapse://hosts/{host}/stacks`, `synapse://stacks`, `synapse://stacks/{host}/{stack}`, `synapse://stacks/{host}/{stack}/env`, `synapse://containers/{host}`, `synapse://containers/{host}/{id}`. Rust exposes schema resources, `synapse://hosts`, `synapse://compose/projects`, and help resources. |
+| Root SSH login gate | Original gates `sshUser=root` through elicitation unless `SYNAPSE_ALLOW_ROOT_LOGIN=true`. Rust has destructive-operation elicitation but no root-login gate. |
+| TOFU fingerprint store | Original persists fingerprints to `~/.config/synapse/known_hosts.json` and rejects changed fingerprints. Rust uses strict OpenSSH `known_hosts` with wildcard warnings — different operator behavior. |
+| `SYNAPSE_EXCLUDE_HOSTS` | Original env var to exclude hosts from fleet discovery is absent in Rust. |
+| `SYNAPSE_MCP_ALLOW_YOLO` | Original "skip all confirmation gates" mode. Rust has `SYNAPSE_MCP_ALLOW_DESTRUCTIVE` (per-restart override, loopback-only), which is not identical. |
+| `SYNAPSE_DEBUG_ERRORS` | Original opt-in mode that returns full internal error detail. Rust always sanitizes internal tool errors. |
+| `git` in exec allowlist | Original includes `git` in `ALLOWED_READ_COMMANDS` with flag guards. Rust deliberately excludes `git`. |
+
 ## Configuration
 
 ```bash
@@ -136,6 +155,18 @@ SYNAPSE_MCP_HOST=127.0.0.1
 SYNAPSE_MCP_PORT=40080
 SYNAPSE_MCP_TOKEN=change-me
 ```
+
+Key environment variables:
+
+| Variable | Default | Description |
+|---|---:|---|
+| `SYNAPSE_MCP_HOST` | `127.0.0.1` | Bind host for HTTP transport. |
+| `SYNAPSE_MCP_PORT` | `40080` | Bind port for HTTP transport. |
+| `SYNAPSE_MCP_TOKEN` | unset | Static bearer token for auth. |
+| `SYNAPSE_MCP_NO_AUTH` | `false` | Disable auth for loopback development only. |
+| `SYNAPSE_NOAUTH` | `false` | Trusted-gateway no-auth mode for non-loopback deployments. |
+| `SYNAPSE_MCP_ALLOW_DESTRUCTIVE` | `false` | Skip destructive-operation confirmation prompts (loopback only). |
+| `SYNAPSE_MCP_MAX_CONCURRENCY` | `50` | Maximum simultaneous in-flight requests on `/mcp` and `/v1/synapse2`. Excess requests are queued, not rejected. Set to `0` to disable. `/health` and `/status` are exempt. |
 
 See `.env.example` for the full list of variables and `docs/CONFIG.md` for auth
 configuration details.

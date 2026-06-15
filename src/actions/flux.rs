@@ -4,14 +4,14 @@
 //! call sites need no changes.
 
 use anyhow::Result;
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 
 use crate::app::SynapseService;
 
 use super::{
-    optional_bool_param, optional_string_array_param, optional_string_param, optional_u32_param,
-    optional_u64_param, require_container_id, require_field, required_string_param,
-    ValidationError,
+    ValidationError, optional_bool_param, optional_string_array_param, optional_string_param,
+    optional_u32_param, optional_u64_param, require_container_id, require_field,
+    required_string_param,
 };
 
 // ── Arg structs ───────────────────────────────────────────────────────────────
@@ -225,7 +225,7 @@ pub(super) async fn dispatch_flux_docker(
     args: &DockerArgs,
     confirmer: &dyn crate::elicitation_gate::Confirmer,
 ) -> Result<Value> {
-    use crate::flux_service::docker::{build_args, PruneTarget};
+    use crate::flux_service::docker::{PruneTarget, build_args};
     let flux = service.flux();
     let host = args.host.as_deref();
     match args.subaction.as_str() {
@@ -298,9 +298,9 @@ pub(super) async fn dispatch_flux_container(
     confirmer: &dyn crate::elicitation_gate::Confirmer,
 ) -> Result<Value> {
     use crate::flux_service::container_lifecycle::{
-        ExecParams, RecreateParams, EXEC_TIMEOUT_DEFAULT_MS,
+        EXEC_TIMEOUT_DEFAULT_MS, ExecParams, RecreateParams,
     };
-    use crate::flux_service::container_read::{ListFilters, LogOptions, DEFAULT_LOG_LINES};
+    use crate::flux_service::container_read::{DEFAULT_LOG_LINES, ListFilters, LogOptions};
     let flux = service.flux();
     let host = args.host.as_deref();
     match args.subaction.as_str() {

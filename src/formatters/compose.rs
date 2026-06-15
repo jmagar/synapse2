@@ -124,9 +124,9 @@ pub fn render_compose_list_markdown(data: &Value) -> String {
         },
     );
     sorted.reverse(); // highest severity first (running → partial → stopped for compose)
-                      // Actually compose is opposite: problems first. Let stopped be severity.
-                      // Re-sort: stopped (0) < partial (1) < running (2) means stopped has lowest numeric, running highest.
-                      // For severity-first (problems first): sort ascending (0=stopped first).
+    // Actually compose is opposite: problems first. Let stopped be severity.
+    // Re-sort: stopped (0) < partial (1) < running (2) means stopped has lowest numeric, running highest.
+    // For severity-first (problems first): sort ascending (0=stopped first).
     sorted.sort_by_key(
         |p| match str_field(p, "status").to_ascii_lowercase().as_str() {
             "running" => 2u8,
@@ -317,7 +317,9 @@ pub fn render_compose_up_markdown(data: &Value) -> String {
     if services_started == 0 {
         return format!("Compose Up for {project} on {host}\nNo services started");
     }
-    format!("Compose Up for {project} on {host}\nServices started: {services_started}\n\n● {project} ({services_started} services)")
+    format!(
+        "Compose Up for {project} on {host}\nServices started: {services_started}\n\n● {project} ({services_started} services)"
+    )
 }
 
 /// Format a compose down result.
@@ -331,7 +333,9 @@ pub fn render_compose_down_markdown(data: &Value) -> String {
     if services_stopped == 0 {
         return format!("Compose Down for {project} on {host}\nNo services stopped");
     }
-    format!("Compose Down for {project} on {host}\nServices stopped: {services_stopped}\n\n○ {project} ({services_stopped} services stopped)")
+    format!(
+        "Compose Down for {project} on {host}\nServices stopped: {services_stopped}\n\n○ {project} ({services_stopped} services stopped)"
+    )
 }
 
 /// Format a compose restart result.
@@ -345,7 +349,9 @@ pub fn render_compose_restart_markdown(data: &Value) -> String {
     if services_restarted == 0 {
         return format!("Compose Restart for {project} on {host}\nNo services restarted");
     }
-    format!("Compose Restart for {project} on {host}\nServices restarted: {services_restarted}\n\n◐ {project} ({services_restarted} services restarted)")
+    format!(
+        "Compose Restart for {project} on {host}\nServices restarted: {services_restarted}\n\n◐ {project} ({services_restarted} services restarted)"
+    )
 }
 
 /// Format compose logs as markdown.

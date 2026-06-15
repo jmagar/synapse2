@@ -260,9 +260,10 @@ async fn resolve_compose_project_reports_missing_project() {
         .await
         .unwrap_err();
 
-    assert!(err
-        .to_string()
-        .contains("compose project \"missing\" not found"));
+    assert!(
+        err.to_string()
+            .contains("compose project \"missing\" not found")
+    );
 }
 
 #[tokio::test]
@@ -333,9 +334,10 @@ async fn compose_operations_report_missing_project_before_exec() {
         .unwrap_err();
 
     for err in [status, up, down, restart, recreate, logs, build, pull] {
-        assert!(err
-            .to_string()
-            .contains("compose project \"missing\" not found"));
+        assert!(
+            err.to_string()
+                .contains("compose project \"missing\" not found")
+        );
     }
     assert!(
         mock.calls() > 0,
@@ -632,18 +634,22 @@ async fn host_driver_local_host_executes_non_docker_ops_through_local_seam() {
         .unwrap();
 
     assert_eq!(info["info"][0]["host"], "local");
-    assert!(info["info"][0]["info"]
-        .as_str()
-        .unwrap_or("")
-        .contains("Linux"));
+    assert!(
+        info["info"][0]["info"]
+            .as_str()
+            .unwrap_or("")
+            .contains("Linux")
+    );
     assert_eq!(uptime["uptime"][0]["host"], "local");
     assert_eq!(resources["resources"][0]["host"], "local");
     assert_eq!(network["network"][0]["host"], "local");
     assert_eq!(mounts["host"], "local");
-    assert!(mounts["mounts"]
-        .as_str()
-        .unwrap_or("")
-        .contains("Filesystem"));
+    assert!(
+        mounts["mounts"]
+            .as_str()
+            .unwrap_or("")
+            .contains("Filesystem")
+    );
     assert_eq!(doctor["host"], "local");
     assert_eq!(doctor["checks"].as_array().unwrap().len(), 3);
 }

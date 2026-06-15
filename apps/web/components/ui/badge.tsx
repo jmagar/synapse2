@@ -1,6 +1,4 @@
-"use client";
-
-import * as React from "react";
+import type { HTMLAttributes, Ref } from "react";
 import { cn, devWarn } from "@/lib/utils";
 
 export type BadgeTone = "info" | "success" | "warn" | "error" | "neutral" | "rose" | "violet";
@@ -74,56 +72,55 @@ function resolveTone(variant: BadgeTone | "default" | undefined): BadgeTone {
   return variant;
 }
 
-export interface BadgeProps extends React.HTMLAttributes<HTMLSpanElement> {
+export interface BadgeProps extends HTMLAttributes<HTMLSpanElement> {
   /** Semantic or expressive tone. "default" is a deprecated alias for "neutral". */
   variant?: BadgeTone | "default";
   dot?: boolean;
+  ref?: Ref<HTMLSpanElement>;
 }
 
-const Badge = React.forwardRef<HTMLSpanElement, BadgeProps>(
-  ({ className, variant, dot = false, style, children, ...props }, ref) => {
-    const tone = resolveTone(variant);
-    const { text, border, bg, dot: dotColor, dotShadow } = badgeToneMap[tone];
+function Badge({ className, variant, dot = false, style, children, ref, ...props }: BadgeProps) {
+  const tone = resolveTone(variant);
+  const { text, border, bg, dot: dotColor, dotShadow } = badgeToneMap[tone];
 
-    return (
-      <span
-        ref={ref}
-        className={cn(
-          "inline-flex items-center gap-1.5 px-2 py-0.5 uppercase leading-none border whitespace-nowrap",
-          className,
-        )}
-        style={{
-          borderRadius: "4px",
-          background: bg,
-          borderColor: border,
-          color: text,
-          fontFamily: "var(--aurora-font-mono, 'JetBrains Mono', monospace)",
-          fontSize: "var(--aurora-type-micro)",
-          fontWeight: 650,
-          letterSpacing: "0.075em",
-          ...style,
-        }}
-        {...props}
-      >
-        {dot && (
-          <span
-            aria-hidden="true"
-            style={{
-              display: "inline-block",
-              width: "5px",
-              height: "5px",
-              borderRadius: "50%",
-              backgroundColor: dotColor,
-              flexShrink: 0,
-              boxShadow: dotShadow,
-            }}
-          />
-        )}
-        {children}
-      </span>
-    );
-  },
-);
+  return (
+    <span
+      ref={ref}
+      className={cn(
+        "inline-flex items-center gap-1.5 px-2 py-0.5 uppercase leading-none border whitespace-nowrap",
+        className,
+      )}
+      style={{
+        borderRadius: "4px",
+        background: bg,
+        borderColor: border,
+        color: text,
+        fontFamily: "var(--aurora-font-mono, 'JetBrains Mono', monospace)",
+        fontSize: "var(--aurora-type-micro)",
+        fontWeight: 650,
+        letterSpacing: "0.075em",
+        ...style,
+      }}
+      {...props}
+    >
+      {dot && (
+        <span
+          aria-hidden="true"
+          style={{
+            display: "inline-block",
+            width: "5px",
+            height: "5px",
+            borderRadius: "50%",
+            backgroundColor: dotColor,
+            flexShrink: 0,
+            boxShadow: dotShadow,
+          }}
+        />
+      )}
+      {children}
+    </span>
+  );
+}
 Badge.displayName = "Badge";
 
 export { Badge };

@@ -1,4 +1,4 @@
-use anyhow::{bail, Result};
+use anyhow::{Result, bail};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeSet;
 use std::path::{Component, Path};
@@ -7,6 +7,7 @@ use std::path::{Component, Path};
 #[path = "synapse_tests.rs"]
 mod tests;
 
+#[non_exhaustive]
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
 pub enum HostProtocol {
@@ -201,13 +202,14 @@ fn path_is_under_root(path: &str, root: &str) -> bool {
 
     let path_obj = Path::new(path);
     let root_obj = Path::new(root);
-    if path_obj.exists() && root_obj.exists() {
-        if let (Ok(canonical_path), Ok(canonical_root)) = (
+    if path_obj.exists()
+        && root_obj.exists()
+        && let (Ok(canonical_path), Ok(canonical_root)) = (
             std::fs::canonicalize(path_obj),
             std::fs::canonicalize(root_obj),
-        ) {
-            return canonical_path.starts_with(canonical_root);
-        }
+        )
+    {
+        return canonical_path.starts_with(canonical_root);
     }
 
     path == root

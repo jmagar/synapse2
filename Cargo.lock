@@ -3041,6 +3041,7 @@ dependencies = [
  "ssh2-config",
  "synapse2",
  "tempfile",
+ "thiserror",
  "tokio",
  "toml",
  "tower",

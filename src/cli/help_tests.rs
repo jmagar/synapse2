@@ -1,5 +1,5 @@
 use super::color::{CYAN_ANSI, PRIMARY_ANSI};
-use super::help::{classify_help, render_command, render_top_level, HelpRequest};
+use super::help::{HelpRequest, classify_help, render_command, render_top_level};
 
 const RESET: &str = "\x1b[0m";
 

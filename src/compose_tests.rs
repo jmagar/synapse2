@@ -8,8 +8,8 @@ use super::*;
 use crate::ssh::{CommandOutput, SshExecutor};
 use crate::synapse::{HostConfig, HostProtocol};
 use async_trait::async_trait;
-use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicUsize, Ordering};
 
 // ── programmable mock executor ──────────────────────────────────────────────
 
@@ -223,9 +223,11 @@ async fn discovery_parses_compose_files_in_nested_dirs() {
         "explicit name: {names:?}"
     );
     assert!(names.contains(&"beta"), "dir-name fallback: {names:?}");
-    assert!(projects
-        .iter()
-        .all(|p| p.discovered_from == DiscoveredFrom::Scan));
+    assert!(
+        projects
+            .iter()
+            .all(|p| p.discovered_from == DiscoveredFrom::Scan)
+    );
 }
 
 // ── cache: second list() does not re-run discovery ──────────────────────────

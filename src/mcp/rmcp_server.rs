@@ -12,6 +12,7 @@ use std::{borrow::Cow, sync::Arc, time::Instant};
 
 use lab_auth::AuthContext;
 use rmcp::{
+    ErrorData, RoleServer, ServerHandler,
     model::{
         CallToolRequestParams, CallToolResult, GetPromptRequestParams, GetPromptResult,
         Implementation, ListPromptsResult, ListResourcesResult, ListToolsResult,
@@ -19,11 +20,10 @@ use rmcp::{
         ServerInfo, Tool,
     },
     service::{Peer, RequestContext},
-    ErrorData, RoleServer, ServerHandler,
 };
 use serde_json::{Map, Value};
 
-use crate::actions::{required_scope_for_parsed_action, SynapseAction};
+use crate::actions::{SynapseAction, required_scope_for_parsed_action};
 
 use crate::server::{AppState, AuthPolicy};
 
@@ -107,22 +107,20 @@ impl ServerHandler for SynapseRmcpServer {
         // enumerating valid action names.
         if let Some(auth_ctx) = auth {
             // Authenticated: safe to return specific errors
-            if let Some(parsed_action) = parsed_action.as_ref() {
-                if let Some(required_scope) = required_scope_for_parsed_action(parsed_action) {
-                    check_scope(auth_ctx, required_scope, parsed_action.name())?;
-                }
+            if let Some(parsed_action) = parsed_action.as_ref()
+                && let Some(required_scope) = required_scope_for_parsed_action(parsed_action)
+            {
+                check_scope(auth_ctx, required_scope, parsed_action.name())?;
             }
         } else {
             // Unauthenticated (loopback or trusted gateway): still validate action
             // but don't leak information before scope check
-            if let Some(parsed_action) = parsed_action.as_ref() {
-                if let Some(required_scope) = required_scope_for_parsed_action(parsed_action) {
-                    if required_scope != crate::actions::READ_SCOPE
-                        && required_scope != crate::actions::WRITE_SCOPE
-                    {
-                        return Err(ErrorData::invalid_request("invalid request", None));
-                    }
-                }
+            if let Some(parsed_action) = parsed_action.as_ref()
+                && let Some(required_scope) = required_scope_for_parsed_action(parsed_action)
+                && required_scope != crate::actions::READ_SCOPE
+                && required_scope != crate::actions::WRITE_SCOPE
+            {
+                return Err(ErrorData::invalid_request("invalid request", None));
             }
         }
 

@@ -50,12 +50,19 @@ impl SynapseService {
     ///
     /// The host repository resolves the real host topology (`SYNAPSE_HOSTS_CONFIG`
     /// → `SYNAPSE_CONFIG_FILE` → `~/.ssh/config`) shared by both flux and scout.
+    ///
+    /// A single [`SshPool`] is threaded from flux through to the scout service and
+    /// the Docker client cache, so all three consumers share ControlMaster
+    /// connections rather than opening independent pools (`C-1`/`P-C1`).
     pub fn new() -> Self {
         let host_repo: Arc<dyn HostRepository> = Arc::new(FileHostRepository::default());
-        Self {
-            flux: FluxService::new(Arc::clone(&host_repo)),
-            scout: ScoutService::new(host_repo),
-        }
+        let flux = FluxService::new(Arc::clone(&host_repo));
+        // Share flux's ssh_pool with scout so the whole process uses one SSH pool.
+        // The cast to `Arc<dyn SshExecutor>` is required because ScoutService
+        // holds the executor as a trait object (C-1/P-C1).
+        let shared_pool = flux.ssh_pool() as Arc<dyn crate::ssh::SshExecutor>;
+        let scout = ScoutService::new(host_repo).with_ssh_executor(shared_pool);
+        Self { flux, scout }
     }
 
     /// Inject a custom `HostRepository` (for testing or future DI).

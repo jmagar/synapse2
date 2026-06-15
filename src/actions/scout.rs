@@ -3,14 +3,14 @@
 //! All items here are re-exported from the parent [`crate::actions`] module so
 //! call sites need no changes.
 
-use anyhow::{bail, Result};
+use anyhow::{Result, bail};
 use serde_json::Value;
 
 use crate::app::SynapseService;
 
 use super::{
-    optional_string_array_param, optional_string_param, optional_u32_param, required_string_param,
-    ValidationError,
+    ValidationError, optional_string_array_param, optional_string_param, optional_u32_param,
+    required_string_param,
 };
 
 // ── Arg structs ───────────────────────────────────────────────────────────────

@@ -51,10 +51,10 @@ jobs:
             ext: ".exe"
 
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
 
       - name: Install Rust target
-        uses: dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # stable
         with:
           targets: ${{ matrix.target }}
 
@@ -73,7 +73,7 @@ jobs:
           sudo apt-get install -y pkg-config libssl-dev
 
       - name: Cache Cargo
-        uses: actions/cache@v5
+        uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5
         with:
           path: |
             ~/.cargo/registry
@@ -112,21 +112,21 @@ jobs:
             ${{ env.BINARY_NAME }}${{ matrix.ext }}
 
       - name: Upload artifact
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
           name: ${{ env.BINARY_NAME }}-${{ matrix.arch }}
           path: artifacts/
 
   # ── Commit binaries to bin/ via Git LFS ──────────────────────────────────────
   #
-  # SECURITY TEMPLATE NOTE: This job pushes directly to `main` from a
-  # tag-triggered workflow using GITHUB_TOKEN. This bypasses branch protection
-  # if your repo has it enabled. Options:
-  #   1. Disable this job if you distribute binaries via Release assets only.
-  #   2. Replace GITHUB_TOKEN with a narrowly-scoped PAT (repo:contents write).
-  #   3. Push to a dedicated `binaries` branch instead of `main`.
-  # The push is intentional — it updates LFS pointers so `git lfs pull` works
-  # in the Claude plugin install flow. Audit before enabling in production repos.
+  # SECURITY: This job pushes to a dedicated `binaries` branch (not `main`)
+  # to avoid bypassing branch protection on the default branch.
+  # The push updates LFS pointers so `git lfs pull` works in the Claude plugin
+  # install flow. An auto-PR is opened from `binaries` → `main` via `gh pr create`.
+  #
+  # Option: If you don't need the LFS pointer in-repo at all, delete this job
+  # entirely and distribute binaries via Release assets only (the `release` job
+  # below already does this). That is the simpler and safer path.
   lfs-commit:
     name: Commit binaries to bin/ (Git LFS)
     needs: build
@@ -134,16 +134,17 @@ jobs:
     timeout-minutes: 20
     permissions:
       contents: write
+      pull-requests: write
 
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           lfs: true
           # Use a deploy key or token with write access to push the commit.
           token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Download all artifacts
-        uses: actions/download-artifact@v8
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
         with:
           path: artifacts/
           merge-multiple: true
@@ -169,12 +170,34 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
 
-      - name: Commit LFS binaries
+      - name: Commit LFS binaries to binaries branch
         run: |
+          set -euo pipefail
+          # Push to a dedicated `binaries` branch — never directly to `main`.
+          # Branch protection on `main` is not bypassed; the PR below allows
+          # normal review/auto-merge to land the pointer update.
+          BRANCH="binaries/release-${{ github.ref_name }}"
+          git checkout -b "${BRANCH}"
           git add bin/
           git diff --staged --quiet || \
             git commit -m "chore: release binaries ${{ github.ref_name }}"
-          git push origin HEAD:main
+          git push origin "${BRANCH}"
+
+      - name: Open auto-merge PR to main
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          BRANCH="binaries/release-${{ github.ref_name }}"
+          # Open a PR; if one already exists for this branch the command exits non-zero
+          # but we continue so the rest of the release job is not blocked.
+          gh pr create \
+            --base main \
+            --head "${BRANCH}" \
+            --title "chore: update LFS binary pointers for ${{ github.ref_name }}" \
+            --body "Automated PR: updates \`bin/\` LFS pointers for release \`${{ github.ref_name }}\`. Safe to auto-merge once CI passes." \
+            --label "automated" \
+            || echo "PR already exists or skipped"
 
   # ── Create GitHub Release ─────────────────────────────────────────────────────
   release:
@@ -186,10 +209,10 @@ jobs:
       contents: write
 
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
 
       - name: Download all artifacts
-        uses: actions/download-artifact@v8
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
         with:
           path: artifacts/
           merge-multiple: true
@@ -201,7 +224,7 @@ jobs:
           cat SHA256SUMS
 
       - name: Create GitHub Release
-        uses: softprops/action-gh-release@v3
+        uses: softprops/action-gh-release@b4309332981a82ec1c5618f44dd2e27cc8bfbfda # v3
         with:
           # TEMPLATE: Update release notes format if you have a CHANGELOG.
           generate_release_notes: true

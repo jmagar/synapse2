@@ -1,10 +1,10 @@
 //! Route-level smoke tests for public status and optional REST compatibility.
 
 use axum::{
-    body::{to_bytes, Body},
-    http::{header, Method, Request, StatusCode},
+    body::{Body, to_bytes},
+    http::{Method, Request, StatusCode, header},
 };
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use synapse2::{server, testing::loopback_state};
 use tower::ServiceExt;
 
@@ -137,10 +137,12 @@ async fn rest_unknown_action_is_bad_request() {
     .await;
 
     assert_eq!(status, StatusCode::BAD_REQUEST);
-    assert!(body["error"]
-        .as_str()
-        .unwrap()
-        .contains("unknown synapse2 action"));
+    assert!(
+        body["error"]
+            .as_str()
+            .unwrap()
+            .contains("unknown synapse2 action")
+    );
 }
 
 #[tokio::test]
@@ -154,6 +156,96 @@ async fn status_returns_only_local_redacted_metadata() {
     assert_eq!(body["transport"], "http");
     assert!(body.get("version").is_some());
     assert!(body.get("api_key").is_none(), "{body}");
+}
+
+/// Destructive REST actions (no elicitation channel) must return 403, not 500.
+///
+/// `flux.docker.prune` is write-scoped and confirmer-gated. On loopback state
+/// (no auth), the request bypasses scope checks and reaches the `DenyConfirm`
+/// gate which returns a typed `ConfirmationDenied` error. The REST handler must
+/// map that to 403 Forbidden — not 500 — and not log at error level.
+#[tokio::test]
+async fn rest_destructive_action_confirmation_denied_returns_403_not_500() {
+    // loopback_state has allow_destructive=false (default) and no auth,
+    // so the request passes scope enforcement and reaches DenyConfirm.
+    let app = server::router(loopback_state());
+    let (status, body) = request_json(
+        app,
+        Method::POST,
+        "/v1/synapse2",
+        Some(json!({
+            "action": "flux.docker.prune",
+            "params": {
+                "host": "local",
+                "prune_target": "images",
+                "force": true
+            }
+        })),
+    )
+    .await;
+
+    assert_eq!(
+        status,
+        StatusCode::FORBIDDEN,
+        "flux.docker.prune with DenyConfirm must return 403 Forbidden, not 500; body={body}"
+    );
+    assert!(
+        body["error"]
+            .as_str()
+            .unwrap_or_default()
+            .contains("destructive"),
+        "403 body must mention 'destructive'; body={body}"
+    );
+}
+
+// Scout destructive ops must also map ConfirmationDenied → 403 (the typed
+// error is preserved through the deadline wrapper rather than stringified).
+#[tokio::test]
+async fn rest_scout_exec_confirmation_denied_returns_403() {
+    let app = server::router(loopback_state());
+    let (status, body) = request_json(
+        app,
+        Method::POST,
+        "/v1/synapse2",
+        // `ls` is allowlisted, so it passes command validation and reaches the
+        // DenyConfirm gate (scout exec is confirmation-gated).
+        Some(json!({
+            "action": "scout.exec",
+            "params": { "host": "local", "path": "/tmp", "command": "ls" }
+        })),
+    )
+    .await;
+
+    assert_eq!(
+        status,
+        StatusCode::FORBIDDEN,
+        "scout.exec with DenyConfirm must return 403, not 500; body={body}"
+    );
+}
+
+// Narrowness guard: a non-confirmation service error must NOT be mapped to 403
+// (otherwise the 403 arm would mask genuine failures as policy denials).
+#[tokio::test]
+async fn rest_non_confirmation_error_is_not_403() {
+    let app = server::router(loopback_state());
+    let (status, body) = request_json(
+        app,
+        Method::POST,
+        "/v1/synapse2",
+        // `rm` is not allowlisted: command validation fails BEFORE the confirmer
+        // gate, so this is not a ConfirmationDenied and must not return 403.
+        Some(json!({
+            "action": "scout.exec",
+            "params": { "host": "local", "path": "/tmp", "command": "rm" }
+        })),
+    )
+    .await;
+
+    assert_ne!(
+        status,
+        StatusCode::FORBIDDEN,
+        "a non-confirmation error must not be reported as 403; body={body}"
+    );
 }
 
 #[tokio::test]

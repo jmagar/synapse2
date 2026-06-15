@@ -4,41 +4,66 @@
 //! on first use and lazily reconnecting after passive-health eviction.
 
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{Duration, Instant};
 
-use anyhow::{anyhow, bail, Context, Result};
+use anyhow::{Context, Result, anyhow, bail};
 use async_trait::async_trait;
 use dashmap::DashMap;
 use openssh::{KnownHosts, Session, SessionBuilder};
-use tokio::sync::Semaphore;
+use tokio::sync::{OnceCell, Semaphore};
 
 use crate::synapse::HostConfig;
 
 use super::{
-    CommandOutput, SshExecutor, CONNECT_TIMEOUT, DEFAULT_EXEC_PERMITS, EVICTION_INTERVAL,
-    IDLE_TIMEOUT, SERVER_ALIVE_INTERVAL,
+    CONNECT_TIMEOUT, CommandOutput, DEFAULT_EXEC_PERMITS, EVICTION_INTERVAL, IDLE_TIMEOUT,
+    SERVER_ALIVE_INTERVAL, SshExecutor,
 };
+
+/// A fixed epoch for converting `Instant` durations to `u64` nanoseconds.
+///
+/// `Instant` is not representable as a number directly, so we measure all
+/// timestamps as nanoseconds elapsed *since this anchor*. The anchor is
+/// initialised lazily on first use (via `std::sync::OnceLock`) and remains
+/// stable for the rest of the process lifetime.
+fn instant_epoch() -> Instant {
+    use std::sync::OnceLock;
+    static EPOCH: OnceLock<Instant> = OnceLock::new();
+    *EPOCH.get_or_init(Instant::now)
+}
+
+/// Convert an `Instant` to nanoseconds since [`instant_epoch`], saturating to
+/// `u64::MAX` if the instant is implausibly far in the future.
+fn instant_to_nanos(t: Instant) -> u64 {
+    t.saturating_duration_since(instant_epoch())
+        .as_nanos()
+        .try_into()
+        .unwrap_or(u64::MAX)
+}
 
 /// A pooled SSH session: one multiplexed `openssh::Session` plus the per-host
 /// exec semaphore and a last-activity timestamp for idle eviction.
+///
+/// `last_used_nanos` stores nanoseconds since [`instant_epoch`] as an
+/// [`AtomicU64`], replacing the former `std::sync::Mutex<Instant>`.  This is
+/// lock-free and avoids mutex contention in async contexts (A-M4 / P-M5).
 pub struct PooledSession {
     pub(super) session: Arc<Session>,
     pub(super) permits: Arc<Semaphore>,
-    pub(super) last_used: std::sync::Mutex<Instant>,
+    pub(super) last_used_nanos: AtomicU64,
 }
 
 impl PooledSession {
     pub(super) fn touch(&self) {
-        if let Ok(mut guard) = self.last_used.lock() {
-            *guard = Instant::now();
-        }
+        self.last_used_nanos
+            .store(instant_to_nanos(Instant::now()), Ordering::Relaxed);
     }
 
     pub(super) fn idle_for(&self, now: Instant) -> Duration {
-        self.last_used
-            .lock()
-            .map(|t| now.saturating_duration_since(*t))
-            .unwrap_or_default()
+        let last_nanos = self.last_used_nanos.load(Ordering::Relaxed);
+        let now_nanos = instant_to_nanos(now);
+        let age_nanos = now_nanos.saturating_sub(last_nanos);
+        Duration::from_nanos(age_nanos)
     }
 
     /// Shared session handle for concurrent multiplexed exec / port forwarding.
@@ -47,13 +72,45 @@ impl PooledSession {
     }
 }
 
+/// Return a process-private directory for SSH ControlMaster sockets with mode
+/// 0700. Preference order:
+///
+/// 1. `$XDG_RUNTIME_DIR/synapse2/` (already 0700, owned by the current user)
+/// 2. `<temp_dir>/synapse2-<pid>/` created with mode 0700
+///
+/// The directory is created on first call and reused thereafter. Using a
+/// process-private path prevents other local users from connecting through our
+/// ControlMaster socket.
+fn control_dir() -> Result<std::path::PathBuf> {
+    use std::fs;
+    use std::os::unix::fs::PermissionsExt;
+
+    let dir = if let Some(xdg) = std::env::var_os("XDG_RUNTIME_DIR") {
+        std::path::PathBuf::from(xdg).join("synapse2")
+    } else {
+        std::env::temp_dir().join(format!("synapse2-{}", std::process::id()))
+    };
+
+    if !dir.exists() {
+        fs::create_dir_all(&dir)
+            .with_context(|| format!("create ControlMaster dir {}", dir.display()))?;
+    }
+    // Always enforce 0700 even if the directory already existed.
+    fs::set_permissions(&dir, fs::Permissions::from_mode(0o700))
+        .with_context(|| format!("chmod 0700 ControlMaster dir {}", dir.display()))?;
+
+    Ok(dir)
+}
+
 /// Build the SSH destination string (`[user@]host`) and apply config to the
 /// builder. `ssh_port`/`ssh_config_path` override `~/.ssh/config` defaults.
-fn configure_builder(host: &HostConfig) -> (SessionBuilder, String) {
+fn configure_builder(host: &HostConfig) -> Result<(SessionBuilder, String)> {
+    let ctrl_dir = control_dir()?;
+
     let mut builder = SessionBuilder::default();
     builder
         .known_hosts_check(KnownHosts::Strict)
-        .control_directory("/tmp")
+        .control_directory(ctrl_dir)
         .connect_timeout(CONNECT_TIMEOUT)
         .server_alive_interval(SERVER_ALIVE_INTERVAL);
 
@@ -83,13 +140,13 @@ fn configure_builder(host: &HostConfig) -> (SessionBuilder, String) {
         host.host.clone()
     };
 
-    (builder, destination)
+    Ok((builder, destination))
 }
 
 /// Connect to `host` with the locked 5s outer timeout. Honors the builder
 /// `ConnectTimeout` too, but the outer `tokio::time::timeout` is authoritative.
 pub(crate) async fn connect(host: &HostConfig) -> Result<Session> {
-    let (builder, destination) = configure_builder(host);
+    let (builder, destination) = configure_builder(host)?;
     let fut = builder.connect(&destination);
     match tokio::time::timeout(CONNECT_TIMEOUT, fut).await {
         Ok(Ok(session)) => Ok(session),
@@ -103,8 +160,19 @@ pub(crate) async fn connect(host: &HostConfig) -> Result<Session> {
 }
 
 /// Per-host SSH session pool. One `Arc<Session>` per host, multiplexed.
+///
+/// The inner map value is `Arc<OnceCell<Arc<PooledSession>>>`. The `OnceCell`
+/// acts as a per-key init guard: concurrent tasks that miss the fast path all
+/// share the *same* cell and only one of them runs `connect()`; the rest wait
+/// on the already-in-flight future instead of each opening a 5s connect race.
+///
+/// Invalidation replaces the cell entirely (removes the key), so the next
+/// checkout inserts a fresh cell and reconnects cleanly.
 pub struct SshPool {
-    sessions: DashMap<String, Arc<PooledSession>>,
+    /// Map from pool key → init cell. A cell is present ↔ a connect is in
+    /// flight or already succeeded. A missing key means "not yet connected or
+    /// evicted."
+    sessions: DashMap<String, Arc<OnceCell<Arc<PooledSession>>>>,
     exec_permits: usize,
 }
 
@@ -130,61 +198,80 @@ impl SshPool {
     /// Hand out the shared session for `host`, connecting (and caching) on
     /// first use or after a passive-health eviction.
     ///
-    /// NOTE: never holds a `DashMap` guard across `.await` — the entry guard is
-    /// dropped before connecting, then the connected session is inserted.
+    /// Concurrent calls for the same key share a single `OnceCell` — only one
+    /// initiates a `connect()` and the others wait for it, eliminating the
+    /// K×5s duplicate-connect race on a cold cache miss.
+    ///
+    /// NOTE: DashMap guards are never held across `.await`. The cell Arc is
+    /// cloned out and the guard dropped before any async work begins.
     pub async fn checkout(&self, host: &HostConfig) -> Result<Arc<PooledSession>> {
         let key = Self::key(host);
 
-        // Fast path: existing live session. Clone the Arc out and drop the
-        // guard immediately so we never await while holding a DashMap ref.
-        if let Some(existing) = self.sessions.get(&key) {
-            let pooled = Arc::clone(&existing);
-            drop(existing);
-            pooled.touch();
-            return Ok(pooled);
-        }
-
-        // Slow path: connect without holding any guard.
-        let session = connect(host).await?;
-        let pooled = Arc::new(PooledSession {
-            session: Arc::new(session),
-            permits: Arc::new(Semaphore::new(self.exec_permits)),
-            last_used: std::sync::Mutex::new(Instant::now()),
-        });
-
-        // Insert; if another task raced us, prefer the already-cached entry to
-        // avoid leaking a second control connection.
-        use dashmap::mapref::entry::Entry;
-        match self.sessions.entry(key) {
-            Entry::Occupied(occupied) => {
-                let winner = Arc::clone(occupied.get());
-                // Best-effort close of our now-redundant session.
-                let loser = Arc::clone(&pooled.session);
-                tokio::spawn(async move {
-                    if let Ok(session) = Arc::try_unwrap(loser) {
-                        let _ = session.close().await;
-                    }
-                });
-                winner.touch();
-                Ok(winner)
+        // Get-or-insert the cell for this key. Drop the DashMap guard
+        // immediately after cloning the Arc — never hold it across await.
+        let cell: Arc<OnceCell<Arc<PooledSession>>> = {
+            use dashmap::mapref::entry::Entry;
+            match self.sessions.entry(key.clone()) {
+                Entry::Occupied(o) => Arc::clone(o.get()),
+                Entry::Vacant(v) => {
+                    let cell = Arc::new(OnceCell::new());
+                    v.insert(Arc::clone(&cell));
+                    cell
+                }
             }
-            Entry::Vacant(vacant) => {
-                vacant.insert(Arc::clone(&pooled));
-                Ok(pooled)
+        };
+
+        // `get_or_try_init` guarantees exactly one `connect()` per cell across
+        // concurrent callers. Additional callers await the shared future.
+        let exec_permits = self.exec_permits;
+        let pooled = match cell
+            .get_or_try_init(|| async move {
+                let session = connect(host).await?;
+                Ok::<Arc<PooledSession>, anyhow::Error>(Arc::new(PooledSession {
+                    session: Arc::new(session),
+                    permits: Arc::new(Semaphore::new(exec_permits)),
+                    last_used_nanos: AtomicU64::new(instant_to_nanos(Instant::now())),
+                }))
+            })
+            .await
+        {
+            Ok(pooled) => pooled,
+            Err(e) => {
+                // Connect failed: `OnceCell` resets itself, but the empty cell
+                // would linger in the map (`evict_idle` skips uninitialised
+                // cells). Drop it so `len()`/metrics don't count a ghost entry
+                // and the next checkout starts fresh — but only if it's still
+                // our uninitialised cell (another task may have raced a success).
+                self.sessions
+                    .remove_if(&key, |_, c| c.get().is_none() && Arc::ptr_eq(c, &cell));
+                return Err(e);
             }
-        }
+        };
+
+        pooled.touch();
+        Ok(Arc::clone(pooled))
     }
 
     /// Drop a host's session from the pool (passive health: called on command
     /// failure so the next checkout reconnects).
+    ///
+    /// Removes the cell entirely so the next `checkout` inserts a fresh one
+    /// and triggers a new `connect()`.
     pub fn invalidate(&self, host: &HostConfig) {
         let key = Self::key(host);
-        if let Some((_, pooled)) = self.sessions.remove(&key) {
-            spawn_close(pooled);
+        if let Some((_, cell)) = self.sessions.remove(&key) {
+            // Best-effort close of the old session, if it successfully
+            // initialised before the failure that triggered invalidation.
+            if let Some(pooled) = cell.get() {
+                spawn_close(Arc::clone(pooled));
+            }
         }
     }
 
-    /// Number of cached sessions (pool stats / test assertions).
+    /// Number of cached session cells (pool stats / test assertions).
+    ///
+    /// A cell is counted even while the connect is still in flight; the count
+    /// drops to zero only after `invalidate` / `evict_idle` / `shutdown`.
     pub fn len(&self) -> usize {
         self.sessions.len()
     }
@@ -201,12 +288,23 @@ impl SshPool {
         let stale: Vec<String> = self
             .sessions
             .iter()
-            .filter(|entry| entry.value().idle_for(now) >= IDLE_TIMEOUT)
+            .filter(|entry| {
+                // Only evict cells whose session has successfully initialised
+                // and has been idle long enough. Cells still connecting are
+                // skipped so we don't interrupt an in-flight connect.
+                entry
+                    .value()
+                    .get()
+                    .map(|pooled| pooled.idle_for(now) >= IDLE_TIMEOUT)
+                    .unwrap_or(false)
+            })
             .map(|entry| entry.key().clone())
             .collect();
         for key in stale {
-            if let Some((_, pooled)) = self.sessions.remove(&key) {
-                spawn_close(pooled);
+            if let Some((_, cell)) = self.sessions.remove(&key)
+                && let Some(pooled) = cell.get()
+            {
+                spawn_close(Arc::clone(pooled));
             }
         }
     }
@@ -215,12 +313,11 @@ impl SshPool {
     pub async fn shutdown(&self) {
         let keys: Vec<String> = self.sessions.iter().map(|e| e.key().clone()).collect();
         for key in keys {
-            if let Some((_, pooled)) = self.sessions.remove(&key) {
-                if let Ok(session) = Arc::try_unwrap(pooled) {
-                    if let Ok(session) = Arc::try_unwrap(session.session) {
-                        let _ = session.close().await;
-                    }
-                }
+            if let Some((_, cell)) = self.sessions.remove(&key)
+                && let Some(pooled) = cell.get()
+                && let Ok(session) = Arc::try_unwrap(Arc::clone(&pooled.session))
+            {
+                let _ = session.close().await;
             }
         }
     }
@@ -249,10 +346,10 @@ impl Default for SshPool {
 /// Best-effort detached close of a pooled session (used when we can't await).
 fn spawn_close(pooled: Arc<PooledSession>) {
     tokio::spawn(async move {
-        if let Ok(session) = Arc::try_unwrap(pooled) {
-            if let Ok(session) = Arc::try_unwrap(session.session) {
-                let _ = session.close().await;
-            }
+        if let Ok(session) = Arc::try_unwrap(pooled)
+            && let Ok(session) = Arc::try_unwrap(session.session)
+        {
+            let _ = session.close().await;
         }
     });
 }

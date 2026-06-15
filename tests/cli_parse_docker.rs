@@ -1,4 +1,4 @@
-use synapse2::cli::{parse_args_from, Command};
+use synapse2::cli::{Command, parse_args_from};
 
 #[test]
 fn flux_docker_info_parsed() {

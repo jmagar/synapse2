@@ -10,19 +10,116 @@
 //! - `syslog`  → `tail -n <lines> /var/log/syslog` (fallback: `/var/log/messages`)
 //! - `journal` → `journalctl -n <lines> --no-pager [-u <unit>] [-p <priority>]
 //!                             [--since <since>] [--until <until>]`
-//! - `dmesg`   → `dmesg --color=never` (permission errors → helpful message)
+//! - `dmesg`   → `dmesg --color=never --lines <n>` (permission errors → helpful message)
 //! - `auth`    → `tail -n <lines> /var/log/auth.log` (fallback: `/var/log/secure`)
+//!
+//! # Security (S-H3)
+//!
+//! `journal` filter parameters (`unit`, `priority`, `since`, `until`) are
+//! validated BEFORE being inserted into the argv. Validators:
+//!
+//! - `unit`     : no leading `-`, no NUL, max 256 chars.
+//! - `priority` : must be one of the eight syslog level names or digits 0-7.
+//! - `since`/`until` : no option-like leading `-` (relative times like `-1h`
+//!   are allowed), no NUL, max 64 chars.
+//!
+//! This prevents flag-smuggling (e.g. `unit = "-M container"`) even though the
+//! args are passed via execvp (not a shell) — argv position matters to
+//! journalctl because `-u -M container` would still be parsed as two separate
+//! flags.
 
-use anyhow::Result;
-use serde_json::{json, Value};
+use anyhow::{Result, bail};
+use serde_json::{Value, json};
 
 #[cfg(test)]
 #[path = "logs_tests.rs"]
 mod tests;
 
-use crate::flux_service::host::{is_local_host, HostExec, LocalExec, RemoteExec};
+use crate::flux_service::host::{HostExec, LocalExec, RemoteExec, is_local_host};
 use crate::ssh::SshExecutor;
 use crate::synapse::HostConfig;
+
+// ─── journalctl arg validators (S-H3) ────────────────────────────────────────
+
+/// Known syslog priority names accepted by journalctl (RFC 5424 + aliases).
+const PRIORITY_ALLOWLIST: &[&str] = &[
+    "emerg", "alert", "crit", "err", "warning", "notice", "info", "debug", "0", "1", "2", "3", "4",
+    "5", "6", "7",
+];
+
+/// Maximum length for `unit` values.
+const UNIT_MAX_LEN: usize = 256;
+
+/// Maximum length for `since`/`until` time expressions.
+const TIME_FILTER_MAX_LEN: usize = 64;
+
+/// Validate a `journalctl -u <unit>` argument.
+///
+/// Rejects:
+/// - leading `-` (flag smuggling, e.g. `-M container`)
+/// - NUL bytes
+/// - values longer than `UNIT_MAX_LEN`
+fn validate_journal_unit(unit: &str) -> Result<()> {
+    if unit.starts_with('-') {
+        bail!("journal unit must not start with `-` (got: {unit:?})");
+    }
+    if unit.contains('\0') {
+        bail!("journal unit must not contain NUL bytes");
+    }
+    if unit.len() > UNIT_MAX_LEN {
+        bail!(
+            "journal unit too long: {} chars (max {UNIT_MAX_LEN})",
+            unit.len()
+        );
+    }
+    Ok(())
+}
+
+/// Validate a `journalctl -p <priority>` argument.
+///
+/// Must be one of the eight syslog level names (emerg … debug) or the
+/// numeric equivalents 0–7. All other values, including ranges like
+/// `err..warning`, are rejected.
+fn validate_journal_priority(priority: &str) -> Result<()> {
+    if PRIORITY_ALLOWLIST.contains(&priority) {
+        return Ok(());
+    }
+    bail!(
+        "journal priority must be one of {:?}, got: {priority:?}",
+        PRIORITY_ALLOWLIST
+    );
+}
+
+/// Validate a `journalctl --since`/`--until` time filter argument.
+///
+/// Rejects:
+/// - leading `--` (option injection, e.g. `--output=json`)
+/// - NUL bytes
+/// - values longer than `TIME_FILTER_MAX_LEN`
+fn validate_journal_time_filter(value: &str) -> Result<()> {
+    // Reject option-like values (`-b`, `--boot`) so a filter can never smuggle a
+    // journalctl flag, while still allowing systemd relative times like `-1h`
+    // (leading `-` followed by a digit).
+    let option_like = value.starts_with("--")
+        || (value.starts_with('-')
+            && !value[1..]
+                .chars()
+                .next()
+                .is_some_and(|c| c.is_ascii_digit()));
+    if option_like {
+        bail!("journal time filter must not start with an option-like `-` (got: {value:?})");
+    }
+    if value.contains('\0') {
+        bail!("journal time filter must not contain NUL bytes");
+    }
+    if value.len() > TIME_FILTER_MAX_LEN {
+        bail!(
+            "journal time filter too long: {} chars (max {TIME_FILTER_MAX_LEN})",
+            value.len()
+        );
+    }
+    Ok(())
+}
 
 /// Default line count when no `lines` param is supplied.
 pub const DEFAULT_LINES: u32 = 100;
@@ -88,6 +185,20 @@ pub async fn journal(
     let lines = lines.clamp(1, MAX_LINES);
     let lines_s = lines.to_string();
 
+    // Validate all filter parameters BEFORE building argv (S-H3).
+    if let Some(u) = unit {
+        validate_journal_unit(u)?;
+    }
+    if let Some(p) = priority {
+        validate_journal_priority(p)?;
+    }
+    if let Some(s) = since {
+        validate_journal_time_filter(s)?;
+    }
+    if let Some(u) = until {
+        validate_journal_time_filter(u)?;
+    }
+
     // Build argv with owned strings to avoid lifetime issues.
     let mut args: Vec<String> = vec!["-n".to_owned(), lines_s, "--no-pager".to_owned()];
 
@@ -138,6 +249,15 @@ pub async fn journal(
 /// Permission errors (kernel 3.5+ restriction) are caught and returned as a
 /// structured help message rather than hard-failing.
 /// Grep + tail are applied locally after retrieval.
+///
+/// # Volume reduction (P-M7)
+///
+/// `dmesg` can produce ~512 KB over SSH. We reduce transfer volume by passing
+/// a generous line cap through the `--lines` flag (supported on util-linux
+/// 2.21+); older `dmesg` versions ignore `--lines` gracefully (they produce the
+/// full buffer) and the local tail still applies. `dmesg | tail -n` would
+/// require shell composition, which violates the execvp invariant, so this is a
+/// best-effort size reduction, not a hard cap at the exec layer.
 pub async fn dmesg(
     host: &HostConfig,
     executor: &dyn SshExecutor,
@@ -145,12 +265,20 @@ pub async fn dmesg(
     grep: Option<&str>,
 ) -> Result<Value> {
     let lines = lines.clamp(1, MAX_LINES);
-    let args = &["--color=never"];
+    // Fetch slightly more than requested so local grep-then-tail semantics
+    // match what the caller expects. Multiply by 4 as a generous margin for
+    // grep pre-filtering; cap at 2 × MAX_LINES to avoid unbounded over-fetch.
+    let fetch_lines = (lines.saturating_mul(4)).min(MAX_LINES * 2);
+    let fetch_lines_s = fetch_lines.to_string();
+
+    // --lines caps the ring-buffer entries at the source when available
+    // (util-linux 2.21+). Passed as argv arguments (execvp-safe, no shell).
+    let args: Vec<&str> = vec!["--color=never", "--lines", &fetch_lines_s];
 
     let run_result = if is_local_host(host) {
-        LocalExec.run("dmesg", args).await
+        LocalExec.run("dmesg", &args).await
     } else {
-        RemoteExec { executor, host }.run("dmesg", args).await
+        RemoteExec { executor, host }.run("dmesg", &args).await
     };
 
     match run_result {

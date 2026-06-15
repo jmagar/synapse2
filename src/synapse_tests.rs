@@ -1,4 +1,4 @@
-use super::{validate_command, validate_safe_path, validate_scout_read_path, HostConfig};
+use super::{HostConfig, validate_command, validate_safe_path, validate_scout_read_path};
 use std::fs;
 
 #[test]
@@ -26,10 +26,12 @@ fn validate_safe_path_requires_absolute_path() {
         result.is_err(),
         "relative path starting with ./ should be rejected"
     );
-    assert!(result
-        .unwrap_err()
-        .to_string()
-        .contains("absolute path required"));
+    assert!(
+        result
+            .unwrap_err()
+            .to_string()
+            .contains("absolute path required")
+    );
 
     let result = validate_safe_path("foo/bar");
     assert!(
@@ -103,10 +105,12 @@ fn scout_read_paths_must_stay_under_allowed_roots() {
         result.is_err(),
         "default local host must not allow /etc reads"
     );
-    assert!(result
-        .unwrap_err()
-        .to_string()
-        .contains("outside configured scout read roots"));
+    assert!(
+        result
+            .unwrap_err()
+            .to_string()
+            .contains("outside configured scout read roots")
+    );
 }
 
 #[test]

@@ -8,8 +8,8 @@
 use super::*;
 use openssh::Session;
 use std::os::unix::fs::PermissionsExt;
-use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::Instant;
 use tokio::sync::Semaphore;
 
@@ -313,6 +313,50 @@ async fn pool_evicts_idle_sessions() {
     let future = Instant::now() + IDLE_TIMEOUT + Duration::from_secs(1);
     pool.evict_idle(future);
     assert_eq!(pool.len(), 0, "idle session must be evicted");
+
+    pool.shutdown().await;
+}
+
+// ── pool: concurrent-checkout deduplication (live, skip if no ssh) ──────────
+
+/// T-M4 / P-M9 regression: 8 concurrent execs on the same host must produce
+/// exactly ONE ControlMaster session (not up to 8). The per-key `OnceCell` in
+/// `SshPool::checkout` deduplicates concurrent connects so only one `ssh`
+/// process is spawned.
+#[tokio::test]
+async fn pool_concurrent_checkout_creates_exactly_one_session() {
+    let Some(_probe) = try_localhost_session().await else {
+        eprintln!("skipping: no reachable ssh server on localhost");
+        return;
+    };
+
+    let pool = Arc::new(SshPool::new());
+    let h = host("localhost");
+
+    // Launch 8 tasks that all call exec concurrently. Because they share one
+    // pool and target the same host, the OnceCell must ensure only one connect
+    // races through regardless of scheduling order.
+    let mut handles = Vec::with_capacity(8);
+    for _ in 0..8 {
+        let pool_clone = Arc::clone(&pool);
+        let host_clone = h.clone();
+        handles.push(tokio::spawn(async move {
+            pool_clone
+                .exec(&host_clone, "true", &[])
+                .await
+                .expect("exec true")
+        }));
+    }
+
+    for handle in handles {
+        handle.await.expect("task panicked");
+    }
+
+    assert_eq!(
+        pool.len(),
+        1,
+        "8 concurrent execs on the same host must produce exactly 1 pooled session"
+    );
 
     pool.shutdown().await;
 }

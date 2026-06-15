@@ -9,8 +9,8 @@ use crate::{
     app::SynapseService,
     elicitation_gate::CliStderrWarn,
 };
-use anyhow::{anyhow, Result};
-use serde_json::{json, Value};
+use anyhow::{Result, anyhow};
+use serde_json::{Value, json};
 
 mod host;
 mod parse;
@@ -108,9 +108,9 @@ pub(super) async fn run_container(
     confirmer: &CliStderrWarn,
 ) -> Result<Value> {
     use crate::flux_service::container_lifecycle::{
-        ExecParams, RecreateParams, EXEC_TIMEOUT_DEFAULT_MS,
+        EXEC_TIMEOUT_DEFAULT_MS, ExecParams, RecreateParams,
     };
-    use crate::flux_service::container_read::{ListFilters, LogOptions, DEFAULT_LOG_LINES};
+    use crate::flux_service::container_read::{DEFAULT_LOG_LINES, ListFilters, LogOptions};
     let ContainerArgs {
         response_format: _,
         subaction,

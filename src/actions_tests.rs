@@ -1,6 +1,6 @@
 use super::{
+    ACTION_SPECS, ActionSpec, ActionTransport, DENY_SCOPE, READ_SCOPE, SynapseAction, WRITE_SCOPE,
     is_read_only, required_scope_for_action, required_scope_for_parsed_action, scopes_satisfy,
-    ActionSpec, ActionTransport, SynapseAction, ACTION_SPECS, DENY_SCOPE, READ_SCOPE, WRITE_SCOPE,
 };
 use serde_json::json;
 
