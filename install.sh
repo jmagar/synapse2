@@ -70,9 +70,10 @@ detect_platform() {
 
   case "$(uname -m)" in
     x86_64|amd64) arch="x86_64" ;;
-    aarch64|arm64) arch="aarch64" ;;
     *)
       error "Unsupported architecture: $(uname -m)"
+      error "Only x86_64 release binaries are published."
+      error "Build from source: cargo install --git https://github.com/${REPO}"
       exit 1
       ;;
   esac

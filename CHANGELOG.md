@@ -15,11 +15,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
-- **Published Docker images are now `linux/amd64` only.** The `Docker Publish`
-  workflow previously also built `linux/arm64` under QEMU emulation, which made
-  the emulated Rust release build exceed the job timeout and cancel every run.
-  Dropping arm64 makes publishing reliable again; re-add it via a native arm64
-  runner matrix if arm64 images are needed.
+- **Dropped arm64 support.** The `Docker Publish` workflow previously also built
+  `linux/arm64` under QEMU emulation, which made the emulated Rust release build
+  exceed the job timeout and cancel every run; it now builds `linux/amd64` only.
+  `install.sh` no longer claims to support arm64 hosts (no `aarch64` release
+  binary is published) and instead points arm64 users to a source build, and the
+  CI docs were corrected to match. Re-add arm64 via a native runner matrix if it
+  is needed.
 
 ## [0.5.2] — 2026-06-11
 

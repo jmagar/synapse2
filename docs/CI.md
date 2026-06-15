@@ -43,7 +43,7 @@ Runs on push/PR to main:
 ### `.github/workflows/docker-publish.yml`
 
 Runs on push to main + tags:
-- Multi-platform build (linux/amd64, linux/arm64)
+- Build (linux/amd64)
 - Push to `ghcr.io/jmagar/<repo>:latest` on main, `:<version>` on tags
 - Trivy vulnerability scan
 - SBOM generation
@@ -52,7 +52,7 @@ Runs on push to main + tags:
 ### `.github/workflows/release.yml`
 
 Runs on version tags (`v*`):
-- Build release binaries for linux/amd64 and linux/arm64
+- Build release binaries for linux/amd64 and windows/amd64
 - Create GitHub Release with binary assets
 - Update `install.sh` download URLs
 
