@@ -73,9 +73,10 @@ if [ -f "${DATA_DIR}/auth-jwt.pem" ]; then
     chmod 600 "${DATA_DIR}/auth-jwt.pem"
 fi
 
-# Auth database — owner + group read, no others.
+# Auth database — owner-only. lab-auth rejects any group/other bits
+# (ensure_restrictive_permissions: mode & 0o077 must be 0), so 640 fails.
 if [ -f "${DATA_DIR}/auth.db" ]; then
-    chmod 640 "${DATA_DIR}/auth.db"
+    chmod 600 "${DATA_DIR}/auth.db"
 fi
 
 # ── Validate required environment variables ────────────────────────────────────
