@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # SessionStart / ConfigChange hook for the Synapse2 MCP server plugin.
-# Keep setup policy in the binary; this script only adapts plugin settings to env.
+# Adapts plugin settings to env and delegates setup to an installed synapse binary.
 set -euo pipefail
 
 : "${CLAUDE_PLUGIN_ROOT:=$(cd "$(dirname "$0")/.." && pwd)}"
@@ -23,23 +23,22 @@ export_if_set() {
   export "${env_name}=${value}"
 }
 
-ensure_synapse2_binary() {
-  local bundled="${CLAUDE_PLUGIN_ROOT}/bin/synapse"
-  if [[ ! -x "${bundled}" ]]; then
-    printf 'synapse2 plugin setup: bundled binary not found at %s\n' "${bundled}" >&2
-    printf '  → run: just install   (builds release binary and copies to plugins/synapse2/bin/)\n' >&2
-    exit 1
+synapse_binary() {
+  if command -v synapse >/dev/null 2>&1; then
+    command -v synapse
+    return 0
   fi
 
-  mkdir -p "${HOME}/.local/bin"
-  ln -sf "${bundled}" "${HOME}/.local/bin/synapse"
-  export PATH="${HOME}/.local/bin:${PATH}"
-  printf '%s\n' "${bundled}"
+  printf 'synapse2 plugin setup: synapse is not installed or not on PATH.\n' >&2
+  printf 'Install synapse separately, then run: synapse setup\n' >&2
+  return 1
 }
 
 main() {
   local synapse_bin
-  synapse_bin="$(ensure_synapse2_binary)"
+  if ! synapse_bin="$(synapse_binary)"; then
+    return 0
+  fi
 
   reject_unsafe_value "CLAUDE_PLUGIN_OPTION_API_TOKEN" "${CLAUDE_PLUGIN_OPTION_API_TOKEN:-}"
   export_if_set SYNAPSE_MCP_TOKEN CLAUDE_PLUGIN_OPTION_API_TOKEN

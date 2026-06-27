@@ -65,7 +65,7 @@ The setup script is a thin adapter. It maps plugin settings to environment varia
 
 **Requires Claude Code v2.1.105+.**
 
-`monitors/monitors.json` declares a background `server-health` monitor that starts automatically at session start. It runs `synapse watch` (the binary in `bin/`) and delivers each stdout line to Claude as a notification whenever the MCP server changes state.
+`monitors/monitors.json` declares a background `server-health` monitor that starts automatically at session start. It runs `hooks/watch.sh`, which delegates to an installed `synapse` on PATH, and delivers each stdout line to Claude as a notification whenever the MCP server changes state.
 
 The monitor emits only on state transitions — Claude is not notified while the server is stable. Three states:
 
@@ -73,11 +73,8 @@ The monitor emits only on state transitions — Claude is not notified while the
 - `DOWN` — connection refused / timeout
 - `DEGRADED(HTTP N)` — non-2xx HTTP response
 
-The command references `${CLAUDE_PLUGIN_ROOT}/bin/synapse` — populate `bin/` before installing the plugin:
-
-```bash
-just install   # builds release binary and copies to plugins/synapse2/bin/synapse
-```
+The plugin does not ship or install a binary. Install `synapse` separately before
+enabling the monitor.
 
 Disabling the plugin mid-session does not stop an already-running monitor; it stops when the session ends.
 
@@ -87,8 +84,8 @@ Disabling the plugin mid-session does not stop an already-running monitor; it st
 
 ## Packaging checklist
 
-1. Build the release binary with `just install`.
-2. Confirm `plugins/synapse2/bin/synapse` exists and is executable.
+1. Confirm the plugin does not rely on a bundled `synapse` binary.
+2. Confirm `synapse` is installed separately when testing runtime setup.
 3. Run `cargo test --test plugin_contract`.
 4. Verify all manifests still omit explicit `version` fields.
 5. Install through the target marketplace or local plugin path.

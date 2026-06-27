@@ -30,15 +30,15 @@ When changing user-configurable settings, update all three manifests: `userConfi
 
 ## Monitors (Claude Code v2.1.105+)
 
-`monitors/monitors.json` runs `synapse watch` from `${CLAUDE_PLUGIN_ROOT}/bin/synapse`. The binary must exist at that path before the plugin is installed. Populate it with:
-
-```bash
-just install   # cargo build --release, then copies to plugins/synapse2/bin/synapse
-```
+`monitors/monitors.json` runs `hooks/watch.sh`, which delegates to an installed
+`synapse` on PATH. Plugin monitors must not assume a bundled binary in the
+plugin directory.
 
 The monitor command uses `${user_config.server_url}` substitution — this is resolved at runtime from the user's plugin settings. Do not hardcode URLs in `monitors.json`.
 
-When adding a new monitor: add an entry to `monitors.json` and reference only `${CLAUDE_PLUGIN_ROOT}/bin/synapse` or scripts under `${CLAUDE_PLUGIN_ROOT}/scripts/`. Do not reference bare binary names that depend on PATH — the monitor may start before `plugin-setup.sh` has run.
+When adding a new monitor: add an entry to `monitors.json` and reference only
+scripts under `${CLAUDE_PLUGIN_ROOT}/hooks/`; those scripts should resolve the
+runtime binary from PATH and exit non-blocking when it is unavailable.
 
 ## Updating the skill
 
